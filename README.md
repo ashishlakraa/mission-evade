@@ -19,7 +19,7 @@ Opening `index.html` by double-click does not work, because browsers block ES mo
 **Deploy to S3** (static website hosting on):
 
 ```bash
-aws s3 sync . s3://<your-bucket> --exclude "node_modules/*" --exclude "tests/*" --exclude "lambda/*" --exclude ".git/*"
+aws s3 sync . s3://<your-bucket> --exclude "node_modules/*" --exclude "tests/*" --exclude "lambda/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "README.md" --exclude "ramp.csv"
 ```
 
 ## Controls
