@@ -10,7 +10,7 @@ It is a static site: plain JavaScript modules, no build step. Three.js loads fro
 
 ```bash
 # from this folder
-python3 -m http.server 8000
+npm start
 # open http://localhost:8000
 ```
 

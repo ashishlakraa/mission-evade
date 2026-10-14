@@ -7,7 +7,7 @@
   },
   "scripts": {
     "test": "node --test tests/core.test.mjs",
-    "start": "python3 -m http.server 8000"
+    "start": "npx --yes serve -l 8000 ."
   },
   "license": "MIT",
   "dependencies": {
