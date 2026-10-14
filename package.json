@@ -1,0 +1,17 @@
+{
+  "name": "mission-evade",
+  "version": "0.3.0",
+  "description": "Top-down 3D stealth game: behavior-tree guards, A*, LLM + memory learning between runs",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node --test tests/core.test.mjs",
+    "start": "python3 -m http.server 8000"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "type": "module"
+}

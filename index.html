@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mission Evade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Mission Evade</span>
+      <span class="run-no" id="runNo">Run 1</span>
+    </div>
+    <div class="hud" aria-live="polite">
+      <div class="hud-item"><span class="hud-k">Time</span><span class="hud-v" id="hudTime">0.0s</span></div>
+      <div class="hud-item"><span class="hud-k">Decoys</span><span class="pips" id="hudDecoys"></span></div>
+      <div class="hud-item"><span class="hud-k">Learner</span><span class="hud-v chip-learn" id="hudLearner">Local</span></div>
+    </div>
+    <div class="top-actions">
+      <div class="seg" role="group" aria-label="Camera">
+        <button type="button" id="viewAngled" aria-pressed="true">Angled</button>
+        <button type="button" id="viewTop" aria-pressed="false">Top-down</button>
+      </div>
+      <button type="button" id="btnPause">Pause</button>
+      <button type="button" id="btnRestart">Restart</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="keys" id="keys">
+      <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+      <span><kbd>Space</kbd> throw decoy</span>
+      <span><kbd>R</kbd> restart</span>
+      <span><kbd>G</kbd> paths</span>
+      <span><kbd>H</kbd> heat map</span>
+      <span><kbd>V</kbd> camera</span>
+    </div>
+    <div class="paused" id="pausedTag" hidden>Paused</div>
+
+    <div class="endcard" id="endcard" hidden>
+      <div class="end-inner">
+        <p class="end-kicker" id="endKicker">Run 1</p>
+        <h2 class="end-title" id="endTitle">Escaped</h2>
+        <p class="end-sub" id="endSub"></p>
+        <div class="learn-box" id="learnBox">
+          <div class="learn-head">
+            <span class="learn-title">What the guards learned</span>
+            <span class="chip-learn" id="learnSource"></span>
+          </div>
+          <p class="learn-busy" id="learnBusy">Reading run memory…</p>
+          <p class="learn-why" id="learnWhy" hidden></p>
+          <ul class="learn-changes" id="learnChanges" hidden></ul>
+          <p class="learn-note" id="learnNote" hidden></p>
+        </div>
+        <div class="end-actions">
+          <button type="button" class="primary" id="btnNext">Next run <kbd>Enter</kbd></button>
+          <button type="button" id="btnShowHeat">Show heat map</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="endcard" id="bootFail" hidden>
+      <div class="end-inner">
+        <p class="end-kicker">Game did not start</p>
+        <h2 class="end-title lost" id="bootTitle">Open through a local server</h2>
+        <p class="end-sub" id="bootWhy"></p>
+        <pre class="boot-cmd" id="bootErr" hidden></pre>
+        <div id="bootServe" hidden>
+          <pre class="boot-cmd">python -m http.server 8000</pre>
+          <p class="end-sub">Run that in this folder, then open <b>http://localhost:8000</b>. In VS Code, the Live Server extension works too.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="pad" id="pad" aria-label="Touch controls">
+      <button type="button" data-k="up" aria-label="Up">▲</button>
+      <button type="button" data-k="left" aria-label="Left">◀</button>
+      <button type="button" data-k="down" aria-label="Down">▼</button>
+      <button type="button" data-k="right" aria-label="Right">▶</button>
+      <button type="button" data-k="decoy" class="pad-decoy">Decoy</button>
+    </div>
+  </main>
+
+  <aside class="panel">
+    <section class="sec" aria-labelledby="h-guards">
+      <div class="sec-head">
+        <h2 id="h-guards">Guards</h2>
+        <div class="tabs" role="tablist" id="guardTabs"></div>
+      </div>
+      <div class="guard-card" id="guardCard">
+        <div class="gc-row">
+          <span class="state-pill" id="gcState" data-state="PATROL">Patrol</span>
+          <div class="meter" title="Suspicion"><span class="meter-k">Suspicion</span><span class="meter-bar"><i id="gcSus"></i></span></div>
+        </div>
+        <dl class="kv">
+          <div><dt>Current lead</dt><dd id="gcLead">none</dd></div>
+          <div><dt>Last A* search</dt><dd id="gcAstar">—</dd></div>
+        </dl>
+        <h3 class="sub-h">Behavior tree <span class="legend"><i data-s="RUNNING"></i>running <i data-s="SUCCESS"></i>success <i data-s="FAILURE"></i>failure</span></h3>
+        <div class="bt-wrap" id="btWrap"></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="h-learn">
+      <div class="sec-head">
+        <h2 id="h-learn">Learning</h2>
+        <label class="switch"><input type="checkbox" id="learnToggle" checked><span>Learning on</span></label>
+      </div>
+      <details class="settings" id="llmSettings">
+        <summary>Learner: <b id="learnerName">Local learner (no LLM)</b></summary>
+        <div class="form">
+          <label for="llmProvider">Learner</label>
+          <select id="llmProvider"></select>
+          <label for="llmModel" class="needs-llm">Model</label>
+          <input id="llmModel" class="needs-llm" type="text" autocomplete="off" spellcheck="false">
+          <label for="llmKey" class="needs-key">API key</label>
+          <input id="llmKey" class="needs-key" type="password" autocomplete="off" spellcheck="false" placeholder="Stored only in this browser">
+          <label for="llmEndpoint" class="needs-endpoint">Endpoint URL</label>
+          <input id="llmEndpoint" class="needs-endpoint" type="url" autocomplete="off" spellcheck="false" placeholder="https://…/adapt">
+          <p class="hint" id="llmHint"></p>
+          <button type="button" id="llmSave">Save learner settings</button>
+        </div>
+      </details>
+
+      <h3 class="sub-h">Guard parameters <span class="muted">value within allowed range</span></h3>
+      <div class="params" id="params"></div>
+      <h3 class="sub-h">Learned watch points</h3>
+      <p class="watch" id="watchList">none yet</p>
+
+      <h3 class="sub-h">Run memory <span class="muted" id="memCount">0 runs</span></h3>
+      <ol class="history" id="history"></ol>
+      <button type="button" class="danger" id="memReset">Reset memory</button>
+    </section>
+
+    <section class="sec" aria-labelledby="h-debug">
+      <div class="sec-head"><h2 id="h-debug">Debug</h2><span class="fps" id="fps">— fps</span></div>
+      <div class="toggles">
+        <label><input type="checkbox" id="optPaths" checked> A* paths</label>
+        <label><input type="checkbox" id="optRoutes" checked> Patrol loops</label>
+        <label><input type="checkbox" id="optHeat"> Heat map</label>
+        <label><input type="checkbox" id="optSearch" checked> A* searched cells</label>
+      </div>
+      <canvas class="minimap" id="minimap" aria-label="Debug map"></canvas>
+      <dl class="kv kv-grid">
+        <div><dt>A* calls</dt><dd id="stCalls">0</dd></div>
+        <div><dt>Avg time</dt><dd id="stAvg">—</dd></div>
+        <div><dt>Worst time</dt><dd id="stMax">—</dd></div>
+        <div><dt>Guards</dt><dd id="stGuards">2</dd></div>
+      </dl>
+      <div class="stress">
+        <span class="muted">Stress test</span>
+        <button type="button" id="stressAdd">+ 5 guards</button>
+        <button type="button" id="stressClear">Back to 2</button>
+      </div>
+      <h3 class="sub-h">Event log</h3>
+      <ol class="log" id="log"></ol>
+    </section>
+  </aside>
+</div>
+<script type="module" src="js/main.js" id="mainScript"></script>
+<script>
+// Plain script, so it still runs when the module above is blocked or crashes:
+// explain a page that would otherwise stay blank, with the actual error.
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var shown = false;
+  function fail(title, why, err, serve) {
+    if (window.missionEvade || shown) return;
+    shown = true;
+    $('bootTitle').textContent = title;
+    $('bootWhy').textContent = why;
+    $('bootErr').hidden = !err;
+    $('bootErr').textContent = err || '';
+    $('bootServe').hidden = !serve;
+    $('bootFail').hidden = false;
+  }
+  if (location.protocol === 'file:') {
+    fail('Open through a local server',
+      'This page was opened as a file. Browsers block JavaScript modules on file:// pages, so the game code never loads.', '', true);
+    return;
+  }
+  addEventListener('error', function (e) {
+    var msg = (e.error && e.error.stack) || (e.message + (e.filename ? '\n  at ' + e.filename + ':' + e.lineno : ''));
+    if (/WebGL/i.test(msg)) {
+      fail('WebGL is not available', 'The 3D view needs WebGL. Turn on hardware acceleration in your browser settings (Settings → System), restart the browser, and reload.', msg);
+    } else {
+      fail('Game crashed while starting', 'The game code loaded but threw an error. Details:', msg);
+    }
+  });
+  addEventListener('unhandledrejection', function (e) {
+    fail('Game crashed while starting', 'The game code loaded but threw an error. Details:', String((e.reason && e.reason.stack) || e.reason));
+  });
+  $('mainScript').addEventListener('error', function () {
+    fail('Scripts failed to load',
+      'The game code or three.js (from cdn.jsdelivr.net) could not be downloaded. Check your internet connection, ad blocker or firewall, and the browser console (F12), then reload.');
+  });
+  setTimeout(function () {
+    fail('Game did not start', 'Nothing has run after 10 seconds. Open the browser console (F12) for errors, then reload.');
+  }, 10000);
+})();
+</script>
+</body>
+</html>
