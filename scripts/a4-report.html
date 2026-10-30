@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mission Evade – Assignment 4 Report</title>
+<style>
+  @page { size: Letter; margin: 0.55in 0.6in; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 9.6pt; line-height: 1.34; color: #1f1d1e; margin: 0; }
+  h1 { font-family: Georgia, serif; font-size: 19pt; margin: 0; color: #cc0033; }
+  h2 { font-family: Georgia, serif; font-size: 12.5pt; margin: 12pt 0 4pt; border-bottom: 1.5pt solid #cc0033; padding-bottom: 2pt; }
+  h3 { font-size: 10pt; margin: 8pt 0 2pt; }
+  p { margin: 3pt 0; }
+  .meta { color: #4a4547; margin-top: 2pt; }
+  .link { margin-top: 6pt; padding: 5pt 8pt; background: #fbeff2; border-left: 3pt solid #cc0033; }
+  a { color: #cc0033; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.7pt; line-height: 1.3; }
+  th, td { border: 0.6pt solid #cfc7c3; padding: 3.5pt 5pt; vertical-align: top; text-align: left; }
+  th { background: #2a2627; color: #fdfcfb; font-weight: 600; }
+  td.wk { font-weight: 700; white-space: nowrap; }
+  td.wk span { display: block; font-weight: 400; color: #4a4547; }
+  tr.buffer td { background: #fbeff2; }
+  ul { margin: 2pt 0; padding-left: 13pt; }
+  li { margin: 1.2pt 0; }
+  .note { color: #4a4547; font-size: 8.7pt; }
+  .page2 { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>Mission Evade: Production Plan &amp; Alpha Build</h1>
+<p class="meta">CS 549: AI for Visual Computing · Assignment 4 · Ashish Lakra (al2112), Joel James (jj1176) · October 30, 2026</p>
+<p class="link"><b>Playable alpha (v0.4.0):</b> <a href="http://ai-4-vc-mission-evade.s3-website-us-east-1.amazonaws.com/">http://ai-4-vc-mission-evade.s3-website-us-east-1.amazonaws.com/</a><br>
+Runs in a desktop browser (Chrome tested). Controls: WASD/arrows move, Space throws a decoy, Esc pauses, ` opens the developer view.</p>
+
+<h2>1. Where we are</h2>
+<p>Mission Evade is a top-down 3D stealth game (Three.js). The player crosses a guarded facility to the exit. Pillars: <b>Pathfinding &amp; Navigation</b> (our own A*), <b>NPC AI / Behavior Trees</b> (guards: Catch › Chase › Notice › Investigate › Patrol), and <b>Procedural Generation</b> (planned below). Between runs, an LLM retunes the guards from run memory, and every suggestion goes through our own validator. The alpha adds the full game loop around this core: menu → mission of 5 security levels and 3 lives → win or loss → back to the menu.</p>
+
+<h2>2. Weekly development plan (Weeks 10–12)</h2>
+<table>
+  <tr><th style="width:13%">Week</th><th style="width:33%">Engineering</th><th style="width:27%">Assets</th><th style="width:27%">Integration &amp; milestone</th></tr>
+  <tr>
+    <td class="wk">Week 9<span>Oct 26 – Nov 1</span></td>
+    <td colspan="3"><b>Alpha (this submission):</b> game loop, missions, HUD, reinforcements, exit lock, developer view. See the release notes.</td>
+  </tr>
+  <tr>
+    <td class="wk">Week 10<span>Nov 2 – 8</span></td>
+    <td><ul>
+      <li>Procedural map generator (pillar 3): rooms and corridors on the grid</li>
+      <li>Validate every generated map: fully connected, 2 separate routes to the exit, room for guard routes (reuse the alpha's tests)</li>
+      <li>Generate guard patrol routes automatically for any map</li>
+      <li>Deploy the LLM proxy (AWS Lambda) so visitors need no API key</li>
+    </ul></td>
+    <td><ul>
+      <li>Generate guard and player models with Meshy/Tripo</li>
+      <li>Fix scale, pivots and polygon count, and export as glTF</li>
+    </ul></td>
+    <td><ul>
+      <li>LLM learning live on the hosted build</li>
+      <li><b>Milestone:</b> generator passes all map tests on 100+ seeds</li>
+    </ul></td>
+  </tr>
+  <tr>
+    <td class="wk">Week 11<span>Nov 9 – 15</span></td>
+    <td><ul>
+      <li>A new generated map each mission. Run memory is stored per map</li>
+      <li>Sound with Web Audio: footsteps, guard alert, decoy ring, win/loss</li>
+      <li>Restart (R) costs a life after being spotted (known issue)</li>
+    </ul></td>
+    <td><ul>
+      <li>Wall, floor and exit textures in one consistent style</li>
+      <li>Sound effects (generated or royalty-free)</li>
+    </ul></td>
+    <td><ul>
+      <li>Models, textures and generated maps together in the 3D view</li>
+      <li>First playtest (3–5 players)</li>
+      <li><b>Feature freeze</b> on Nov 15</li>
+    </ul></td>
+  </tr>
+  <tr class="buffer">
+    <td class="wk">Week 12<span>Nov 16 – 24</span><span><b style="color:#cc0033">Buffer</b></span></td>
+    <td colspan="3"><b>No new features.</b> Fix bugs from the playtests. Tune difficulty, especially levels 4–5. Test in Safari, Firefox and on mobile. Check performance with the stress test. Final README, CHANGELOG and report. Tag v1.0 and redeploy. <b>Final deadline: Nov 24.</b></td>
+  </tr>
+</table>
+<p class="note"><b>Cut from scope:</b> LLM “barks” (guards speaking a line on state changes, from our proposal). Weeks 10–11 are already full, and the LLM is already used for learning. We will add barks only if Week 11 ends early.</p>
+
+<div class="page2">
+<h2>3. Release notes: v0.4.0-alpha (changes since the midterm, v0.3.0)</h2>
+
+<h3>New features</h3>
+<ul>
+  <li><b>Full game loop.</b> Main menu → run ⇄ pause → run result → mission complete / mission failed → menu. A state machine (<code>js/game.js</code>) runs it and refuses illegal moves between screens.</li>
+  <li><b>Missions:</b> 5 security levels and 3 lives. An escape clears a level, and a catch costs a life. A mission in progress survives a page reload (<b>Continue mission</b>).</li>
+  <li><b>Reinforcements:</b> each level above 1 adds one guard (up to 6). New guards are posted where run memory says the player was caught, spotted or walks most. They are never posted near the start or exit, never in view of them, and never crowded together, so the exit can always be reached.</li>
+  <li><b>Exit lock:</b> the exit opens only while every guard is on patrol. It turns red while any guard is suspicious, searching or chasing.</li>
+  <li><b>Ringing decoy:</b> a decoy rings for 6 seconds and pulls guards in to search while the player slips past.</li>
+  <li><b>New map:</b> smaller (16×12, down from 24×16) with two separate routes to the exit, and redrawn guard routes.</li>
+  <li><b>Menus and HUD:</b> main menu (start/continue, new mission, how to play, settings), pause menu, and mission-end stats. The HUD shows level, lives, objective, a detection meter (Hidden / Seen / Spotted!) and guard messages.</li>
+  <li><b>Developer view</b> (behavior tree, learner, memory, debug map, stress test) is hidden from players. Toggle it with `.</li>
+  <li><b>Hosted LLM hook:</b> a deployed Lambda proxy can serve as the default learner, so visitors need no API key.</li>
+  <li><b>Tests:</b> 15 new automated tests, 40 in total, all passing. They include a bot that plays a full mission against the real simulation.</li>
+</ul>
+
+<h3>Bug fixes</h3>
+<ul>
+  <li>Pressing R during learning started the next run with old guard settings. Restart now works only during a run.</li>
+  <li>A late LLM reply could overwrite memory that had just been reset. Late replies are now dropped.</li>
+  <li>One error inside a frame froze the game for good. The loop now survives, logs the error and pauses.</li>
+  <li>After a GPU reset (lost WebGL context), the game drew into a dead context. It now pauses until the context returns.</li>
+  <li>Space and arrow keys were blocked from scrolling the page outside of play. They are now captured only during a run.</li>
+  <li>Browsers could cache a mix of old and new modules after an update. The server and S3 deploy now send <code>no-cache</code>.</li>
+  <li>A focused top-bar button was pressed again by Space while throwing a decoy.</li>
+</ul>
+
+<h3>Known issues</h3>
+<ul>
+  <li>Restarting a run (R) costs no life, so a spotted player can restart to avoid a catch. Fix planned for Week 11.</li>
+  <li>The LLM proxy is not deployed yet. The hosted build uses the built-in learner unless a key is entered in the developer view. Planned for Week 10.</li>
+  <li>No sound in this build (Week 11). Only one hand-built map, no procedural maps yet (Weeks 10–11).</li>
+  <li>Levels 4–5 (5–6 guards on a small map) may be too hard. Balancing follows the playtests.</li>
+  <li>A decoy thrown near the exit keeps it locked for about 6–9 seconds. This is intended, but may need tuning.</li>
+  <li>Run memory from the midterm map is not carried over to the new map.</li>
+  <li>Tested only in Chrome (desktop and mobile emulation). Safari and Firefox are untested. A missing favicon causes a harmless console 404.</li>
+</ul>
+</div>
+
+</body>
+</html>
