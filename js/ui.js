@@ -1,4 +1,5 @@
-// Side panel: live behavior tree, guard status, learned parameters, run memory, event log.
+// Screens and HUD (menu, run end, mission end, detection meter, toasts) and the
+// developer side panel (live behavior tree, guard status, learned parameters, run memory, event log).
 
 import { walk } from './bt.js';
 import { PARAM_SPEC } from './config.js';
@@ -15,6 +16,7 @@ export class Panel {
     this.treeFor = null;
     this.nodeEls = new Map();
     this.logLen = -1;
+    this.toastLen = 0;
   }
 
   // ---------- guards ----------
@@ -177,9 +179,12 @@ export class Panel {
 
   // ---------- end of run ----------
 
-  showEnd(world, run, mem) {
+  showEnd(world, run, mem, mission = null, change = null) {
     $('endcard').hidden = false;
-    $('endKicker').textContent = `Run ${run.n} · ${mem.runs.length} in memory`;
+    const played = change?.change === 'level-up' ? mission.level - 1 : mission?.level;
+    $('endKicker').textContent = mission
+      ? `Run ${mission.runs} · Security level ${played}/${mission.levels}`
+      : `Run ${run.n} · ${mem.runs.length} in memory`;
     const title = $('endTitle');
     if (world.outcome === 'escaped') {
       title.textContent = 'Escaped';
@@ -190,6 +195,22 @@ export class Panel {
       title.className = 'end-title lost';
       $('endSub').textContent = `Guard ${run.caughtBy} caught you after ${run.time}s.`;
     }
+    const em = $('endMission');
+    em.hidden = !mission || !change;
+    if (mission && change) {
+      const msg = {
+        'level-up': ['up', `Security level cleared. Next: level ${mission.level} of ${mission.levels}, with one more guard posted where you were caught or seen.`],
+        'life-lost': ['down', `You lost a life. ${mission.lives} of ${mission.maxLives} left.`],
+        won: ['up', 'Final security level cleared. Mission complete!'],
+        lost: ['down', 'No lives left. Mission failed.'],
+        none: ['', 'Practice run: the mission is not affected.'],
+      }[change.change];
+      em.innerHTML = '<span></span>';
+      em.firstChild.className = msg[0];
+      em.firstChild.textContent = msg[1];
+    }
+    const over = !!mission?.result;
+    $('btnNext').innerHTML = over ? 'See mission result <kbd>Enter</kbd>' : 'Next run <kbd>Enter</kbd>';
     $('learnBusy').hidden = true;
     $('learnWhy').hidden = true;
     $('learnChanges').hidden = true;
@@ -249,11 +270,52 @@ export class Panel {
 
   hideEnd() { $('endcard').hidden = true; }
 
+  // ---------- menu and mission end ----------
+
+  renderMenu(mission) {
+    const going = !!mission && !mission.result;
+    $('btnContinue').hidden = !going;
+    const nm = $('btnNewMission');
+    nm.className = going ? '' : 'primary';
+    nm.innerHTML = going ? 'New mission' : 'Start mission <kbd>Enter</kbd>';
+    const st = $('menuStatus');
+    st.hidden = !going;
+    if (going) {
+      st.textContent = `Mission in progress: security level ${mission.level}/${mission.levels}, `
+        + `${mission.lives} ${mission.lives === 1 ? 'life' : 'lives'} left, ${mission.runs} run${mission.runs === 1 ? '' : 's'} played.`;
+    }
+  }
+
+  showMissionEnd(m) {
+    const won = m.result === 'won';
+    $('mKicker').textContent = won ? 'All security levels cleared' : 'Out of lives';
+    const t = $('mTitle');
+    t.textContent = won ? 'Mission complete' : 'Mission failed';
+    t.className = `end-title ${won ? 'won' : 'lost'}`;
+    $('mSub').textContent = won
+      ? `You beat ${m.levels} levels of guards that kept learning your routes, in ${m.runs} runs.`
+      : `The guards caught you ${m.catches} time${m.catches === 1 ? '' : 's'}. They reached security level ${m.level}. A new mission starts them from scratch.`;
+    $('mRuns').textContent = String(m.runs);
+    $('mEscapes').textContent = String(m.escapes);
+    $('mCatches').textContent = String(m.catches);
+    $('mSpotted').textContent = String(m.spotted);
+    $('mBest').textContent = m.bestTime == null ? '—' : `${m.bestTime}s`;
+    $('mLevel').textContent = `${m.level}/${m.levels}`;
+  }
+
   // ---------- HUD, stats, log ----------
 
-  updateHud(world, mem) {
+  updateHud(world, mem, mission) {
     $('hudTime').textContent = `${world.time.toFixed(1)}s`;
-    $('runNo').textContent = `Run ${(mem.runs.at(-1)?.n ?? 0) + (world.outcome ? 0 : 1)}`;
+    $('runNo').textContent = mission ? `Run ${mission.runs + (world.outcome ? 0 : 1)}` : 'Practice';
+    $('hudLevel').textContent = mission ? `${mission.level}/${mission.levels}` : '—';
+    const lives = $('hudLives');
+    const maxL = mission?.maxLives ?? 0;
+    if (lives.childElementCount !== maxL) {
+      lives.textContent = '';
+      for (let i = 0; i < maxL; i++) lives.appendChild(document.createElement('i'));
+    }
+    [...lives.children].forEach((el, i) => el.classList.toggle('used', i >= (mission?.lives ?? 0)));
     const pips = $('hudDecoys');
     const total = world.decoysLeft + world.decoyLog.length;
     if (pips.childElementCount !== total) {
@@ -262,6 +324,44 @@ export class Panel {
     }
     [...pips.children].forEach((el, i) => el.classList.toggle('used', i >= world.decoysLeft));
   }
+
+  // How close any guard is to spotting the player.
+  updateDetect(world) {
+    let sus = 0, alerted = false;
+    for (const g of world.guards) {
+      if (g.stress) continue;
+      sus = Math.max(sus, g.bb.suspicion);
+      alerted ||= g.bb.alerted;
+    }
+    const level = alerted ? 'spotted' : sus > 0.02 ? 'seen' : 'hidden';
+    const box = $('detect');
+    if (box.dataset.level !== level) {
+      box.dataset.level = level;
+      $('detectLabel').textContent = { hidden: 'Hidden', seen: 'Seen…', spotted: 'Spotted!' }[level];
+    }
+    $('detectBar').style.width = `${Math.round((alerted ? 1 : sus) * 100)}%`;
+    $('objective').textContent = alerted ? 'Break line of sight!'
+      : !world.exitOpen ? 'Exit locked: wait until every guard is back on patrol'
+        : 'Reach the green exit';
+    $('objective').classList.toggle('locked', !world.exitOpen);
+  }
+
+  // Short messages over the 3D view for what the guards are doing.
+  updateToasts(world) {
+    if (world.log.length < this.toastLen) this.toastLen = 0;
+    const box = $('toasts');
+    for (const e of world.log.slice(this.toastLen)) {
+      if (/^Decoy thrown|^Player reached/.test(e.text)) continue;
+      const li = document.createElement('li');
+      li.textContent = e.text;
+      box.appendChild(li);
+      setTimeout(() => li.remove(), 3000);
+      while (box.childElementCount > 3) box.firstChild.remove();
+    }
+    this.toastLen = world.log.length;
+  }
+
+  clearToasts() { $('toasts').textContent = ''; this.toastLen = 0; }
 
   updateStats(world, fps) {
     $('fps').textContent = `${Math.round(fps)} fps`;

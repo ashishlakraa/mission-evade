@@ -1,35 +1,49 @@
 // Mission Evade — game configuration.
 // Everything the learner is allowed to change lives in PARAM_SPEC, with hard bounds.
 
-export const MAP_ID = 'facility-01';
+export const MAP_ID = 'facility-02';
+
+// Function URL of the deployed LLM proxy (lambda/index.mjs). When set, the hosted
+// build uses it as the default learner, so visitors never need an API key.
+export const HOSTED_LEARNER_ENDPOINT = '';
 
 // Legend: # wall   . floor   S player start   E exit
 // x runs left→right (columns), y runs top→bottom (rows).
 export const MAP = [
-  '########################',
-  '#S.......#.............#',
-  '#........#....######...#',
-  '#..####..#....#........#',
-  '#..#.........##...###..#',
-  '#..#..####.......#.....#',
-  '#.....#..#...##..#..####',
-  '####..#..#...#.........#',
-  '#.....#......#..####...#',
-  '#..####..###.#.....#...#',
-  '#........#.......#.#...#',
-  '#.###....#..####.#.....#',
-  '#...#.......#....###...#',
-  '#...#..####.#..........#',
-  '#.......#...........#E.#',
-  '########################',
+  '################',
+  '#S...#.........#',
+  '#....#.###.###.#',
+  '#....#.#.....#.#',
+  '#..........#.#.#',
+  '###.####.#.#...#',
+  '#...#....#.###.#',
+  '#.#.#.##.#.....#',
+  '#.#...#..###.#.#',
+  '#.####.#.#.....#',
+  '#........#....E#',
+  '################',
 ];
 
-// Exactly two guards (the MVP configuration). Waypoints are grid cells.
-// Guards walk between waypoints with A*, so a straight line between them is not required.
+// The two base guards. Waypoints are grid cells. Guards walk between waypoints
+// with A*, so a straight line between them is not required.
+// A covers the north corridor and the east side (and walks back the same way, so it
+// never crosses the middle); B covers the west and the middle.
 export const GUARD_DEFS = [
-  { id: 'A', name: 'Guard A', route: [[11, 1], [22, 1], [22, 5], [18, 7], [11, 7]] },
-  { id: 'B', name: 'Guard B', route: [[2, 10], [8, 12], [16, 13], [22, 10], [14, 10]] },
+  { id: 'A', name: 'Guard A', route: [[6, 1], [14, 1], [14, 7], [11, 7], [14, 6], [14, 2]] },
+  { id: 'B', name: 'Guard B', route: [[1, 10], [8, 10], [8, 6], [10, 4], [6, 4]] },
 ];
+
+// Each security level above 1 adds one reinforcement guard, posted where the
+// player was caught or spotted before (see js/reinforce.js).
+export const REINFORCE_IDS = ['C', 'D', 'E', 'F'];
+export const REINFORCE_RULES = {
+  minFromStart: 5,  // cells (euclidean) from the player start
+  exitZone: 5,      // the exit approach (cells within this many steps of the exit) stays clear:
+                    // reinforcements may not stand in it or see into it, so they never seal the exit
+  minApart: 3,      // from every other guard's post
+  maxShared: 1,     // a reinforcement's beat may share ground with at most this many other guards
+  patrolReach: 4,   // a reinforcement walks between its post and a cell up to this many steps away
+};
 
 export const PLAYER_SPEED = 3.2;   // cells per second
 export const PLAYER_RADIUS = 0.3;
@@ -37,6 +51,8 @@ export const GUARD_RADIUS = 0.32;
 export const CATCH_DISTANCE = 0.62; // centre-to-centre contact distance
 export const DECOYS_PER_RUN = 3;
 export const DECOY_THROW = 4.5;     // cells
+export const DECOY_RING = 6;        // seconds a landed decoy keeps ringing
+export const DECOY_PULSE = 1;       // seconds between rings; guards in hearing range come to it
 export const WATCH_PAUSE = 1.8;     // seconds a guard holds at a learned watch point
 
 // Learnable guard parameters. The learner (LLM or local) can only move these

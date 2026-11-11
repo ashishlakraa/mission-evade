@@ -33,6 +33,7 @@ export class Guard {
     this.id = def.id;
     this.name = def.name;
     this.stress = !!def.stress;
+    this.reinforcement = !!def.reinforcement;
     this.route = def.route.map(([x, y]) => ({ x: x + 0.5, y: y + 0.5 }));
     this.patrol = buildPatrol(this.route, world.watchPoints[this.id] || null, world.grid);
     this.x = this.patrol[0].x;
@@ -121,18 +122,25 @@ export class Guard {
     this.world.guardAlerted(this);
   }
 
-  // A noise (decoy, radio call) reaches this guard. Returns true if it reacts.
+  // A noise (decoy, radio call) reaches this guard. Returns true if it goes to check,
+  // 'refresh' if it is already on its way to that same ringing decoy, false if it ignores it.
   hear(noise) {
     if (this.bb.alerted || noise.from === this) return false;
     const d = Math.hypot(noise.x - this.x, noise.y - this.y);
     if (d > this.params.hearingRange) return false;
-    this.setLead({ x: noise.x, y: noise.y }, noise.kind);
+    const lead = this.bb.lead;
+    if (noise.source != null && lead && lead.source === noise.source) {
+      lead.holdUntil = noise.until ?? lead.holdUntil;
+      return 'refresh';
+    }
+    this.setLead({ x: noise.x, y: noise.y }, noise.kind, { source: noise.source ?? null, holdUntil: noise.until ?? 0 });
     return true;
   }
 
-  setLead(pos, reason) {
+  // extra.holdUntil keeps the guard searching the spot until that world time (a ringing decoy).
+  setLead(pos, reason, extra = {}) {
     const bb = this.bb;
-    bb.lead = { x: pos.x, y: pos.y, reason, id: ++bb.leadSeq };
+    bb.lead = { x: pos.x, y: pos.y, reason, id: ++bb.leadSeq, source: null, holdUntil: 0, ...extra };
     this.investigateSteps.halt({}); // restart the investigation for the new lead
   }
 
@@ -188,6 +196,7 @@ export class Guard {
       bb.alerted = false;
       bb.suspicion = 0;
       this.setLead(bb.lastKnown, 'lost sight');
+      this.world.note(`${this.name} lost the player and searches the area`);
       return FAILURE;
     }
     this.ensurePath('chase-last', bb.lastKnown);
@@ -215,7 +224,8 @@ export class Guard {
     const bb = this.bb;
     bb.searchT += c.dt;
     this.turnToward(bb.searchBase + Math.sin(bb.searchT * 2.1) * 1.4, c.dt);
-    return bb.searchT >= this.params.searchTime ? SUCCESS : RUNNING;
+    const held = this.world.time < (bb.lead?.holdUntil ?? 0);
+    return bb.searchT >= this.params.searchTime && !held ? SUCCESS : RUNNING;
   }
 
   // ---------- movement ----------

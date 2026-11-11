@@ -1,8 +1,22 @@
 # Mission Evade
 
-A top-down 3D stealth game for CS 549 (AI for Visual Computing). One player, two guards. Guards run a behavior tree, move with A*, and learn between runs from your earlier routes, using an LLM plus run memory.
+A top-down 3D stealth game for CS 549 (AI for Visual Computing). One player against two guards, plus one more guard for each security level. Guards run a behavior tree, move with A*, and learn between runs from your earlier routes, using an LLM plus run memory.
 
-**Goal:** reach the green exit tile without a guard touching you.
+**Goal:** reach the exit tile without a guard touching you. The exit is open (green) only while every guard is on patrol, and locked (red) while any of them is suspicious, investigating or chasing. A mission has **5 security levels** and **3 lives**: each escape clears a level, each catch costs a life, and the guards adapt after every run. Each level above 1 adds a reinforcement guard, posted from run memory where you were caught, then where you were spotted, then where you walk most (`js/reinforce.js`).
+
+## Game loop (alpha, v0.4.0)
+
+```
+Main menu ──▶ Run ⇄ Pause
+                │ escaped / caught
+                ▼
+           Run result (+ what the guards learned) ──▶ next run
+                │ level 5 cleared, or no lives left
+                ▼
+           Mission complete / Mission failed ──▶ play again / main menu
+```
+
+The flow lives in `js/game.js` (a small state machine plus the mission rules, no DOM), so it is covered by headless tests. A mission in progress survives a page reload (**Continue mission** on the menu). Starting a new mission resets what the guards learned. See `CHANGELOG.md` for everything that changed since the midterm build.
 
 ## Run it
 
@@ -19,18 +33,23 @@ Opening `index.html` by double-click does not work, because browsers block ES mo
 **Deploy to S3** (static website hosting on):
 
 ```bash
-aws s3 sync . s3://<your-bucket> --exclude "node_modules/*" --exclude "tests/*" --exclude "lambda/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "README.md" --exclude "ramp.csv"
+aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "lambda/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv"
 ```
+
+`--cache-control no-cache` matters: the game is plain ES modules, and without it browsers may keep some old modules after an update and run a mix of old and new code. `npm start` uses `scripts/serve.mjs`, which sends the same header locally.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
-| W A S D / arrows | Move |
+| W A S D / arrows | Move (touch screens get an on-screen pad) |
 | Space | Throw a decoy (3 per run) |
-| R | Restart the run |
-| Enter | Next run (after a run ends) |
-| G / H / V / P | Toggle A* paths / heat map / camera / pause |
+| Esc / P | Pause menu (resume, restart run, main menu) |
+| R | Restart the run (costs no life) |
+| Enter | Start / continue from the menu, next run, play again |
+| V | Camera: angled / top-down |
+| ` | Developer view (behavior tree, learner, debug map) |
+| G / H | Toggle A* paths / heat map |
 
 ## What is in the MVP
 
@@ -51,7 +70,7 @@ States never flicker. Suspicion fills while the player is in sight and drains wh
 
 **Vision** (`js/grid.js`). Range, angle, and a line-of-sight test using exact grid traversal (DDA), so sight cannot leak through walls or diagonal corner gaps. The 3D cone is ray-cast against the walls, so what you see is what the guard sees.
 
-**Decoy.** Thrown ahead of the player, stops at walls, makes a noise on landing. Guards within hearing range investigate it. A guard that spots you radios the others.
+**Decoy.** Thrown ahead of the player and stops at walls. After landing it rings for 6 seconds, once per second. Guards within hearing range walk over and keep searching there until it stops. A guard that spots you radios the others.
 
 **Learning with an LLM and memory** (`js/memory.js`, `js/learner.js`, `js/llm.js`).
 
@@ -62,18 +81,22 @@ States never flicker. Suspicion fills while the player is in sight and drains wh
 
 Learner options (Learning panel): **Claude**, **OpenAI**, **your own endpoint**, or the **local learner**, which needs no key and uses the heat map with simple rules. If an LLM call fails, the game falls back to the local learner and says so. Learning can be switched off to freeze the guards.
 
+## Developer view
+
+Players see only the 3D view and the HUD (security level, lives, time, decoys, a detection meter, and short messages about what the guards are doing). The side panel with the live behavior tree, learner settings, learned parameters, run memory, debug map and stress test is the **developer view**: press <kbd>`</kbd> or the **Dev view** button.
+
 ## API keys
 
-A key typed into the page is saved only in that browser and sent only to that provider. On a public site, do not ask visitors for keys. Instead deploy `lambda/index.mjs` as an AWS Lambda with a Function URL, set `ANTHROPIC_API_KEY` in its environment, and choose "Own endpoint (proxy)" in the game. The endpoint receives `{system, prompt}` and returns `{"text": "<model reply>"}`.
+A key typed into the page is saved only in that browser and sent only to that provider. On a public site, do not ask visitors for keys. Instead deploy `lambda/index.mjs` as an AWS Lambda with a Function URL, set `ANTHROPIC_API_KEY` in its environment, and put the Function URL in `HOSTED_LEARNER_ENDPOINT` in `js/config.js`. The hosted build then uses it as the default learner, so visitors get LLM learning with no key. (You can also choose "Own endpoint (proxy)" in the developer view.) The endpoint receives `{system, prompt}` and returns `{"text": "<model reply>"}`.
 
 ## Tests
 
 ```bash
 npm install   # only needed for three.js in browser tests; core tests have no dependencies
-node --test tests/core.test.mjs
+npm test
 ```
 
-25 headless tests cover: map connectivity, line of sight through walls and corners, A* optimality against brute-force Dijkstra on 200 random pairs, no corner cutting, the behavior tree's priority and halting, patrol, spot → chase → catch, chase → give-up → search → patrol without flicker, decoys and hearing, escape, and the learner's safety checks.
+40 headless tests. `tests/game.test.mjs` covers the game flow: allowed and refused state changes, levels and lives, corrupt saved missions, and a full mission played by a bot against the real simulation. `tests/core.test.mjs` covers: map connectivity, line of sight through walls and corners, A* optimality against brute-force Dijkstra on 200 random pairs, no corner cutting, the behavior tree's priority and halting, patrol, spot → chase → catch, chase → give-up → search → patrol without flicker, decoys and hearing, escape, and the learner's safety checks.
 
 ## Project layout
 
@@ -91,7 +114,10 @@ js/learner.js       prompt, safety checks, local learner
 js/llm.js           Claude / OpenAI / proxy client
 js/render3d.js      Three.js view
 js/minimap.js       2D debug map (A* searched cells, heat map)
-js/ui.js, main.js   panel and game loop
+js/game.js          screen state machine and mission rules (headless)
+js/reinforce.js     where reinforcement guards are posted (from run memory)
+js/ui.js            menu, HUD, end screens, developer panel
+js/main.js          input, game loop, wiring
 lambda/index.mjs    optional server-side LLM proxy
 tests/              headless tests (node --test)
 ```

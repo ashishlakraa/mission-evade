@@ -3,7 +3,7 @@
 
 import { Guard } from './guard.js';
 import {
-  PLAYER_SPEED, PLAYER_RADIUS, DECOYS_PER_RUN, DECOY_THROW,
+  PLAYER_SPEED, PLAYER_RADIUS, DECOYS_PER_RUN, DECOY_THROW, DECOY_RING, DECOY_PULSE,
 } from './config.js';
 
 export class World {
@@ -21,6 +21,7 @@ export class World {
     this.time = 0;
     this.outcome = null;      // null | 'escaped' | 'caught'
     this.caughtBy = null;
+    this.exitOpen = true;     // the exit works only while every guard is on patrol
     this.player = {
       x: grid.start.x + 0.5, y: grid.start.y + 0.5,
       r: PLAYER_RADIUS, speed: PLAYER_SPEED, face: 0, moving: false,
@@ -50,7 +51,8 @@ export class World {
     for (const g of this.guards) g.sense(dt);
     for (const g of this.guards) g.think(dt);
     this.recordRoute();
-    if (!this.outcome) {
+    this.updateExit();
+    if (!this.outcome && this.exitOpen) {
       const p = this.player, e = this.grid.exit;
       if (Math.floor(p.x) === e.x && Math.floor(p.y) === e.y) {
         this.outcome = 'escaped';
@@ -58,6 +60,14 @@ export class World {
       }
     }
     this.noises = this.noises.filter((n) => this.time - n.t < 1.6);
+  }
+
+  // Lock the exit while any guard is noticing, investigating or chasing.
+  updateExit() {
+    const open = this.guards.every((g) => g.stress || g.state === 'PATROL');
+    if (open === this.exitOpen) return;
+    this.exitOpen = open;
+    if (!this.outcome) this.note(open ? 'Exit open: every guard is back on patrol' : 'Exit locked: a guard is on alert');
   }
 
   movePlayer(dt, { dx = 0, dy = 0 } = {}) {
@@ -80,7 +90,9 @@ export class World {
         || g.isWall(Math.floor(x - r), Math.floor(y + r)) || g.isWall(Math.floor(x + r), Math.floor(y + r));
   }
 
-  // The decoy is thrown ahead of the player, stops at walls, and makes noise on landing.
+  // The decoy is thrown ahead of the player and stops at walls. Once it lands it
+  // rings for DECOY_RING seconds, one ring every DECOY_PULSE; guards that hear it
+  // walk over and keep searching there until it stops.
   throwDecoy() {
     if (this.decoysLeft <= 0 || this.decoyCooldown > 0 || this.outcome) return false;
     const p = this.player;
@@ -88,7 +100,7 @@ export class World {
     const d = {
       id: this.nextId++, fromX: p.x, fromY: p.y,
       x: p.x + Math.cos(p.face) * reach, y: p.y + Math.sin(p.face) * reach,
-      t: 0, flight: 0.45, landed: false,
+      t: 0, flight: 0.45, landed: false, ringUntil: 0, nextRing: 0,
     };
     this.decoys.push(d);
     this.decoysLeft--;
@@ -104,17 +116,22 @@ export class World {
       d.t += dt;
       if (!d.landed && d.t >= d.flight) {
         d.landed = true;
-        this.emitNoise({ x: d.x, y: d.y, kind: 'decoy' });
+        d.ringUntil = this.time + DECOY_RING;
+        d.nextRing = this.time;
+      }
+      if (d.landed && this.time < d.ringUntil && this.time >= d.nextRing) {
+        d.nextRing += DECOY_PULSE;
+        this.emitNoise({ x: d.x, y: d.y, kind: 'decoy', source: d.id, until: d.ringUntil });
       }
     }
-    this.decoys = this.decoys.filter((d) => d.t < d.flight + 3);
+    this.decoys = this.decoys.filter((d) => d.t < d.flight + DECOY_RING + 0.5);
   }
 
   emitNoise(noise) {
     const n = { ...noise, t: this.time };
     this.noises.push(n);
     for (const g of this.guards) {
-      if (g.hear(n)) this.note(`${g.name} heard a ${n.kind} and goes to check`);
+      if (g.hear(n) === true) this.note(`${g.name} heard a ${n.kind} and goes to check`);
     }
   }
 

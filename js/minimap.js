@@ -4,7 +4,7 @@
 
 const COLORS = {
   floor: '#cfd5dc', wall: '#3c4552', grid: 'rgba(60,69,82,.12)',
-  exit: '#2fbf68', start: 'rgba(47,124,246,.35)',
+  exit: '#2fbf68', exitLocked: '#e23e44', start: 'rgba(47,124,246,.35)',
   player: '#2f7cf6', guard: '#d2453f', learn: '#9b6cff',
   heat: [242, 201, 76], heatHot: [226, 62, 68],
   searched: { A: 'rgba(47,124,246,.20)', B: 'rgba(155,108,255,.22)' },
@@ -76,7 +76,7 @@ export class MiniMap {
 
     ctx.fillStyle = COLORS.start;
     ctx.fillRect(grid.start.x * s, grid.start.y * s, s, s);
-    ctx.fillStyle = COLORS.exit;
+    ctx.fillStyle = world.exitOpen ? COLORS.exit : COLORS.exitLocked;
     ctx.fillRect(grid.exit.x * s + 1, grid.exit.y * s + 1, s - 2, s - 2);
 
     for (const g of world.guards) {

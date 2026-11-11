@@ -8,7 +8,10 @@ import { Grid } from '../js/grid.js';
 import { findPath, smoothPath, octile } from '../js/astar.js';
 import { sel, seq, memSeq, cond, act, Status } from '../js/bt.js';
 import { World } from '../js/world.js';
-import { MAP, GUARD_DEFS, DEFAULT_PARAMS, PARAM_SPEC } from '../js/config.js';
+import {
+  MAP, GUARD_DEFS, DEFAULT_PARAMS, PARAM_SPEC, DECOY_RING, DECOY_PULSE, REINFORCE_IDS, REINFORCE_RULES,
+} from '../js/config.js';
+import { reinforcementDefs, postProblem, exitZone, walkOf } from '../js/reinforce.js';
 import { freshMemory, buildRunRecord, recordRun } from '../js/memory.js';
 import { localProposal, validateProposal, applyAdaptation, buildPrompt } from '../js/learner.js';
 
@@ -165,6 +168,8 @@ function makeWorld(params = DEFAULT_PARAMS, watchPoints = {}) {
   return new World({ grid, params, guardDefs: GUARD_DEFS, watchPoints });
 }
 const STEP = 1 / 60;
+// Guards that cannot see or hear, so they stay on patrol.
+const BLIND = { ...DEFAULT_PARAMS, coneRange: 0.1, hearingRange: 0 };
 function run(world, seconds, input = {}, until) {
   for (let t = 0; t < seconds; t += STEP) {
     world.step(STEP, typeof input === 'function' ? input(world) : input);
@@ -209,8 +214,8 @@ test('no flicker: once chasing, state stays CHASE until the give-up rule fires',
   w.player.x = A.x + Math.cos(A.face) * 3; w.player.y = A.y + Math.sin(A.face) * 3;
   run(w, 4, {}, () => A.bb.alerted);
   assert.ok(A.bb.alerted);
-  // Teleport the player far away behind walls: guard must keep chasing for giveUpTime, then search.
-  w.player.x = 1.5; w.player.y = 14.5;
+  // Teleport the player back to the start room, behind walls: guard must keep chasing for giveUpTime, then search.
+  w.player.x = 1.5; w.player.y = 1.5;
   const trace = [];
   run(w, DEFAULT_PARAMS.giveUpTime + DEFAULT_PARAMS.searchTime + 8, {}, () => { trace.push(A.state); return false; });
   const firstNonChase = trace.findIndex((s) => s !== 'CHASE');
@@ -237,7 +242,7 @@ test('noise: a guard in hearing range investigates the spot, then returns to pat
   const w = makeWorld();
   const B = w.guards[1];
   run(w, 0.5); // player waits at the start, out of sight
-  const spot = { x: 5.5, y: 12.5 };
+  const spot = { x: 4.5, y: 10.5 };
   w.emitNoise({ x: spot.x, y: spot.y, kind: 'decoy' });
   assert.ok(run(w, 0.2, {}, () => B.state === 'INVESTIGATE'), `B state ${B.state}`);
   assert.ok(run(w, 10, {}, () => Math.hypot(B.x - spot.x, B.y - spot.y) < 0.3), 'B walked to the noise');
@@ -248,25 +253,194 @@ test('noise: a guard in hearing range investigates the spot, then returns to pat
 test('noise: a guard out of hearing range ignores it', () => {
   const w = makeWorld();
   const A = w.guards[0];
-  w.emitNoise({ x: 2.5, y: 13.5, kind: 'decoy' });
+  w.emitNoise({ x: 2.5, y: 10.5, kind: 'decoy' });
   run(w, 0.2);
   assert.equal(A.bb.lead, null);
 });
 
 test('walls block sight: player behind a wall is not seen', () => {
   const w = makeWorld();
-  const A = w.guards[0]; // starts at (11,1) facing east along row 1
-  A.face = Math.PI;      // face west, toward the wall at x=9
-  w.player.x = 8.5; w.player.y = 1.5; // on the other side of the wall
+  const A = w.guards[0]; // starts at (6,1) facing east along row 1
+  A.face = Math.PI;      // face west, toward the wall at x=5
+  w.player.x = 3.5; w.player.y = 1.5; // on the other side of the wall
   assert.equal(A.canSee(w.player.x, w.player.y), false);
 });
 
 test('escape: reaching the exit ends the run as escaped', () => {
-  const w = makeWorld();
+  const w = makeWorld(BLIND);
   w.player.x = grid.exit.x + 0.5; w.player.y = grid.exit.y - 1.5;
   run(w, 1, { dx: 0, dy: 1 }, (ww) => !!ww.outcome);
   assert.equal(w.outcome, 'escaped');
 });
+
+test('decoy: keeps ringing, and a guard that hears it searches there until it stops', () => {
+  const w = makeWorld();
+  const B = w.guards[1];
+  run(w, 0.5);
+  // Throw south from (6,9), out of B's sight, so it lands in B's hearing range.
+  w.player.x = 6.5; w.player.y = 9.5; w.player.face = Math.PI / 2;
+  w.step(STEP, { decoy: true });
+  w.player.x = 1.5; w.player.y = 1.5;   // then hide back at the start
+  const d = w.decoys[0];
+  const rings = new Set();
+  run(w, 0.45 + DECOY_RING - 0.3, {}, (ww) => { for (const n of ww.noises) if (n.source === d.id) rings.add(n.t); return false; });
+  assert.ok(rings.size >= DECOY_RING / DECOY_PULSE - 1, `rang ${rings.size} times`);
+  assert.equal(B.bb.lead?.source, d.id, 'B is still on the decoy while it rings');
+  assert.equal(B.state, 'INVESTIGATE');
+  assert.ok(Math.hypot(B.x - d.x, B.y - d.y) < 1, 'B stands at the decoy');
+  assert.ok(run(w, DEFAULT_PARAMS.searchTime + 6, {}, () => B.state === 'PATROL'), 'back to patrol after it stops');
+  assert.equal(w.log.filter((e) => e.text.startsWith('Guard B heard')).length, 1, 'one log line, not one per ring');
+});
+
+test('exit: locked while any guard is not on patrol, open again once all are', () => {
+  const w = makeWorld();
+  run(w, 0.2);
+  assert.equal(w.exitOpen, true);
+  w.emitNoise({ x: 4.5, y: 10.5, kind: 'decoy' });   // B goes to check
+  run(w, 0.1);
+  assert.equal(w.exitOpen, false);
+  w.player.x = grid.exit.x + 0.5; w.player.y = grid.exit.y + 0.5;   // standing on the exit does nothing
+  run(w, 0.5);
+  assert.equal(w.outcome, null, 'cannot escape through a locked exit');
+  assert.ok(run(w, 20, {}, (ww) => !!ww.outcome), 'the run ends once the exit opens');
+  if (w.outcome === 'escaped') assert.ok(w.guards.every((g) => g.state === 'PATROL'));
+});
+
+test('reinforcements: posted where the player was caught or spotted, and fair', () => {
+  const mem = freshMemory(grid);
+  const base = { time: 20, decoys: [], params: mem.params, watchPoints: {} };
+  recordRun(mem, grid, { ...base, n: 1, outcome: 'caught', route: [[1, 1], [8, 3], [8, 4]], detections: [{ x: 8, y: 3, t: 5 }] });
+  recordRun(mem, grid, { ...base, n: 2, outcome: 'escaped', route: [[1, 1], [11, 7]], detections: [{ x: 12, y: 3, t: 9 }] });
+  const defs = reinforcementDefs(grid, mem, 2);
+  assert.equal(defs.length, 2);
+  const posts = defs.map((d) => d.route[0]);
+  assert.deepEqual(posts[0], [8, 4], 'first post: where the player was caught');
+  assert.equal(defs[0].reason, 'caught');
+  assert.equal(defs[1].reason, 'spotted');
+  for (const d of defs) {
+    for (const [x, y] of d.route) assert.ok(grid.isWalkable(x, y), `${d.id} (${x},${y}) floor`);
+    assert.equal(postProblem(grid, { x: d.route[0][0], y: d.route[0][1] }), null, `${d.id} post is fair`);
+  }
+  assert.ok(Math.hypot(posts[0][0] - posts[1][0], posts[0][1] - posts[1][1]) >= REINFORCE_RULES.minApart);
+});
+
+test('reinforcements: never stand in or look into the exit approach, even if the player is always caught there', () => {
+  const mem = freshMemory(grid);
+  const route = findPath(grid, grid.start, grid.exit).path.map((c) => [c.x, c.y]);
+  const base = { time: 20, decoys: [], params: mem.params, watchPoints: {} };
+  // A player who keeps getting spotted and caught just before the exit.
+  for (let n = 1; n <= 4; n++) {
+    recordRun(mem, grid, { ...base, n, outcome: 'caught', route: route.slice(0, -2 - (n % 3)),
+      detections: [{ x: 11, y: 7, t: 5 }, { x: 12, y: 7, t: 6 }, { x: 13, y: 7, t: 7 }] });
+  }
+  const zone = exitZone(grid);
+  const sees = (c, z) => Math.hypot(z.x - c.x, z.y - c.y) <= PARAM_SPEC.coneRange.max
+    && grid.lineOfSight(c.x + 0.5, c.y + 0.5, z.x + 0.5, z.y + 0.5);
+  const defs = reinforcementDefs(grid, mem, REINFORCE_IDS.length);
+  assert.equal(defs.length, REINFORCE_IDS.length);
+  for (const d of defs) {
+    // Every cell the guard walks on its beat, not just the two end points.
+    const walk = d.route.length > 1 ? findPath(grid, { x: d.route[0][0], y: d.route[0][1] }, { x: d.route[1][0], y: d.route[1][1] }).path : [{ x: d.route[0][0], y: d.route[0][1] }];
+    for (const c of walk) {
+      assert.ok(!zone.some((z) => z.x === c.x && z.y === c.y), `${d.id} walks into the exit approach at (${c.x},${c.y})`);
+      const seen = zone.find((z) => sees(c, z));
+      assert.ok(!seen, `${d.id} at (${c.x},${c.y}) can see the exit approach at (${seen?.x},${seen?.y})`);
+    }
+  }
+});
+
+test('reinforcements: spread out, so no stretch of floor is walked by more than two guards', () => {
+  const route = findPath(grid, grid.start, grid.exit).path.map((c) => [c.x, c.y]);
+  const memories = [freshMemory(grid)];
+  for (const spot of [[8, 4], [6, 4], [10, 5], [9, 1]]) {
+    const mem = freshMemory(grid);
+    for (let n = 1; n <= 3; n++) {
+      recordRun(mem, grid, { n, time: 20, decoys: [], params: mem.params, watchPoints: {}, outcome: 'caught',
+        route: [...route.slice(0, 6), spot], detections: [{ x: spot[0], y: spot[1], t: 4 }] });
+    }
+    memories.push(mem);
+  }
+  for (const mem of memories) {
+    const defs = [...GUARD_DEFS, ...reinforcementDefs(grid, mem, REINFORCE_IDS.length)];
+    // Ground each guard covers: its walk and the cells next to it.
+    const covers = defs.map((d) => {
+      const set = new Set();
+      for (const c of walkOf(grid, d.route)) {
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) set.add(grid.idx(c.x + dx, c.y + dy));
+      }
+      return set;
+    });
+    for (const d of defs.slice(GUARD_DEFS.length)) {
+      for (const c of walkOf(grid, d.route)) {
+        const n = covers.filter((s) => s.has(grid.idx(c.x, c.y))).length;
+        assert.ok(n <= REINFORCE_RULES.maxShared + 1, `${n} guards around (${c.x},${c.y}) on ${d.id}'s beat`);
+      }
+    }
+  }
+  // The base guards do not share ground with each other.
+  const [a, b] = GUARD_DEFS.map((d) => new Set(walkOf(grid, d.route).map((c) => grid.idx(c.x, c.y))));
+  assert.ok(![...a].some((i) => b.has(i)), 'guards A and B never walk the same cell');
+});
+
+test('reinforcements: with no memory they guard the shortest route, up to one per level', () => {
+  const mem = freshMemory(grid);
+  for (let n = 0; n <= REINFORCE_IDS.length; n++) {
+    const defs = reinforcementDefs(grid, mem, n);
+    assert.equal(defs.length, n);
+    assert.deepEqual(defs.map((d) => d.id), REINFORCE_IDS.slice(0, n));
+  }
+  assert.equal(reinforcementDefs(grid, mem, 99).length, REINFORCE_IDS.length, 'capped');
+  const shortest = findPath(grid, grid.start, grid.exit).path;
+  const [x, y] = reinforcementDefs(grid, mem, 1)[0].route[0];
+  assert.ok(shortest.some((c) => c.x === x && c.y === y), 'on the shortest way out');
+  // The world runs with them: a still player at the start is never caught.
+  const w = new World({ grid, params: DEFAULT_PARAMS, guardDefs: [...GUARD_DEFS, ...reinforcementDefs(grid, mem, 4)] });
+  assert.equal(w.guards.length, 6);
+  run(w, 60);
+  assert.equal(w.outcome, null);
+});
+
+test('map: smaller, with only two independent ways to the exit', () => {
+  assert.ok(grid.w * grid.h <= 16 * 12);
+  // Max number of routes that share no cell (node-disjoint paths), via repeated path removal on a max flow.
+  assert.equal(disjointRoutes(grid), 2);
+});
+
+function disjointRoutes(g) {
+  const id = (x, y) => y * g.w + x;
+  const cap = new Map();
+  const adj = new Map();
+  const add = (u, v, c) => {
+    cap.set(`${u}>${v}`, (cap.get(`${u}>${v}`) || 0) + c);
+    if (!cap.has(`${v}>${u}`)) cap.set(`${v}>${u}`, 0);
+    (adj.get(u) || adj.set(u, []).get(u)).push(v);
+    (adj.get(v) || adj.set(v, []).get(v)).push(u);
+  };
+  const s = id(g.start.x, g.start.y), e = id(g.exit.x, g.exit.y);
+  for (const c of g.freeCells()) {
+    const k = id(c.x, c.y);
+    add(`${k}i`, `${k}o`, k === s || k === e ? 99 : 1);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (g.isWalkable(c.x + dx, c.y + dy)) add(`${k}o`, `${id(c.x + dx, c.y + dy)}i`, 1);
+    }
+  }
+  let flow = 0;
+  for (;;) {
+    const par = new Map([[`${s}i`, null]]);
+    const q = [`${s}i`];
+    while (q.length && !par.has(`${e}o`)) {
+      const u = q.shift();
+      for (const v of adj.get(u) || []) if (!par.has(v) && cap.get(`${u}>${v}`) > 0) { par.set(v, u); q.push(v); }
+    }
+    if (!par.has(`${e}o`)) return flow;
+    for (let v = `${e}o`; par.get(v) !== null; v = par.get(v)) {
+      const u = par.get(v);
+      cap.set(`${u}>${v}`, cap.get(`${u}>${v}`) - 1);
+      cap.set(`${v}>${u}`, cap.get(`${v}>${u}`) + 1);
+    }
+    flow++;
+  }
+}
 
 // ---------------------------------------------------------------- learning & memory
 
@@ -298,9 +472,8 @@ test('learner: out-of-bounds and oversized LLM values are clamped, bad cells rej
 
 test('learner: local proposal puts watch points on the habitual route', () => {
   const mem = freshMemory(grid);
-  // A player who always walks the middle corridor (row 7/8).
-  const route = [];
-  for (let x = 1; x <= 12; x++) route.push([x, x < 5 ? 1 : 8]);
+  // A player who always takes the shortest way out.
+  const route = findPath(grid, grid.start, grid.exit).path.map((c) => [c.x, c.y]);
   for (let i = 0; i < 4; i++) {
     recordRun(mem, grid, { n: i + 1, outcome: 'escaped', time: 30, route, detections: [], decoys: [], params: mem.params, watchPoints: {} });
   }
@@ -321,7 +494,7 @@ test('learner: prompt includes map, memory and the JSON contract', () => {
   recordRun(mem, grid, rec);
   const { system, prompt } = buildPrompt(mem, rec, grid);
   assert.match(system, /JSON/);
-  assert.match(prompt, /########################/);
+  assert.match(prompt, new RegExp(MAP[0]));
   assert.match(prompt, /"watchPoints"/);
   assert.match(prompt, /Most-walked cells/);
 });

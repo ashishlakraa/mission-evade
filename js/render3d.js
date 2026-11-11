@@ -23,6 +23,7 @@ const C = {
   player: 0x2f7cf6,
   guard: 0xd2453f,
   exit: 0x2fbf68,
+  exitLocked: 0xe23e44,
   start: 0x2f7cf6,
   learn: 0x9b6cff,
   path: 0xffffff,
@@ -292,6 +293,10 @@ export class Scene3D {
     const p = world.player;
     this.playerMesh.position.set(this.sx(p.x), 0, this.sz(p.y));
     this.playerMesh.rotation.y = -p.face;
+    // The exit glows green while open, red while a guard is on alert.
+    const exitColor = world.exitOpen ? C.exit : C.exitLocked;
+    this.exitTile.material.color.setHex(exitColor);
+    this.exitBeacon.material.color.setHex(exitColor);
     this.exitBeacon.material.opacity = 0.14 + Math.sin(time * 3) * 0.06;
 
     for (const g of world.guards) {

@@ -2,10 +2,12 @@
 // they learned between runs and page reloads. Storage can be unavailable
 // (private windows, blocked site data); the game then keeps memory in RAM.
 
-import { DEFAULT_PARAMS, MAP_ID } from './config.js';
+import { DEFAULT_PARAMS, MAP_ID, HOSTED_LEARNER_ENDPOINT } from './config.js';
 
 const KEY = `mission-evade:memory:${MAP_ID}:v1`;
 const SETTINGS_KEY = 'mission-evade:llm:v1';
+const MISSION_KEY = `mission-evade:mission:${MAP_ID}:v1`;
+const PREFS_KEY = 'mission-evade:prefs:v1';
 const MAX_RUNS = 40;
 const HEAT_DECAY = 0.8; // older runs fade, recent habits count most
 
@@ -74,10 +76,32 @@ export function recordRun(mem, grid, run) {
 }
 
 export function loadSettings() {
-  const base = { provider: 'local', apiKey: '', model: '', endpoint: '' };
+  // A hosted build can ship a proxy endpoint, so visitors get the LLM learner without a key.
+  const base = HOSTED_LEARNER_ENDPOINT
+    ? { provider: 'proxy', apiKey: '', model: '', endpoint: HOSTED_LEARNER_ENDPOINT }
+    : { provider: 'local', apiKey: '', model: '', endpoint: '' };
   try { return { ...base, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return base; }
 }
 
 export function saveSettings(s) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* storage blocked */ }
+}
+
+// The mission in progress (lives, security level), so Continue survives a reload.
+export function loadMission() {
+  try { return JSON.parse(localStorage.getItem(MISSION_KEY) || 'null'); } catch { return null; }
+}
+
+export function saveMission(m) {
+  try { localStorage.setItem(MISSION_KEY, JSON.stringify(m)); } catch { /* storage blocked */ }
+}
+
+// Per-player conveniences: developer view.
+export function loadPrefs() {
+  const base = { dev: false };
+  try { return { ...base, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { return base; }
+}
+
+export function savePrefs(p) {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* storage blocked */ }
 }
