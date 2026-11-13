@@ -81,5 +81,5 @@ export class Game {
 
   get inProgress() { return !!this.mission && !this.mission.result; }
 
-  startMission() { this.mission = newMission(); }
+  startMission(rules = MISSION_RULES) { this.mission = newMission(rules); }
 }

@@ -33,7 +33,7 @@ Opening `index.html` by double-click does not work, because browsers block ES mo
 **Deploy to S3** (static website hosting on):
 
 ```bash
-aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "lambda/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv"
+aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv"
 ```
 
 `--cache-control no-cache` matters: the game is plain ES modules, and without it browsers may keep some old modules after an update and run a mix of old and new code. `npm start` uses `scripts/serve.mjs`, which sends the same header locally.
@@ -75,19 +75,29 @@ States never flicker. Suspicion fills while the player is in sight and drains wh
 **Learning with an LLM and memory** (`js/memory.js`, `js/learner.js`, `js/llm.js`).
 
 1. Every run is saved to memory in the browser: route, where you were spotted, decoys, outcome. A heat map of your routes builds up, with recent runs weighted more.
-2. After a run, the learner sends the map, the guard settings and their limits, the last run and the heat map to an LLM. It asks for new guard settings plus one **watch point** per guard: a cell added to its patrol where it stops and looks.
-3. Every suggestion passes safety checks before use: each setting stays within its range and moves at most one step per run; watch points must be floor cells away from the start and exit. Chase speed always stays below player speed, so a spotted player can still escape.
+2. After a run, the learner sends the map, the guard settings and their limits, the last run and the heat map to an LLM. It lists **every guard on duty**, reinforcements included, and which of them spotted or caught you. It asks for new team settings, **personal settings for the guards that spotted or caught you**, and one **watch point** per guard: a cell added to its patrol where it stops and looks.
+3. Every suggestion passes safety checks before use, so the game stays fair at all times:
+   - each setting stays within its range and moves at most one step per run; chase speed always stays below player speed, so a spotted player can still escape
+   - only a guard that spotted or caught you gets personal settings, at most 2 steps from the team's; guards that were not involved drift back to the team settings
+   - **fairness lock:** after a catch within 15 s, or 2 catches in a row, no guard may get harder for the next run
+   - watch points are floor cells away from the start and exit; a reinforcement's stays within 6 steps of its post, out of the exit approach and out of sight of the start
 4. The end-of-run card shows what the guards learned and why.
 
-Learner options (Learning panel): **Claude**, **OpenAI**, **your own endpoint**, or the **local learner**, which needs no key and uses the heat map with simple rules. If an LLM call fails, the game falls back to the local learner and says so. Learning can be switched off to freeze the guards.
+Learner options (set by the admin at `/admin`): an **open-weight model** on Hugging Face (default `Qwen/Qwen2.5-7B-Instruct`, served by Featherless AI) or the **local learner**, which needs no key and uses the heat map with simple rules. If an LLM call fails, the game falls back to the local learner and says so. Learning can be switched off to freeze the guards.
 
 ## Developer view
 
-Players see only the 3D view and the HUD (security level, lives, time, decoys, a detection meter, and short messages about what the guards are doing). The side panel with the live behavior tree, learner settings, learned parameters, run memory, debug map and stress test is the **developer view**: press <kbd>`</kbd> or the **Dev view** button.
+Players see only the 3D view and the HUD (security level, lives, time, decoys, a detection meter, and short messages about what the guards are doing). The side panel with the live behavior tree, the current learner, learned team and personal parameters, run memory, debug map and stress test is the **developer view**: press <kbd>`</kbd> or the **Dev view** button.
+
+## Admin dashboard (`/admin`)
+
+Not linked from the game. Configure the learner (model and token), lives, security levels, decoys, whether guards learn by default, whether players may open the developer view, per-guard tuning, and the starting guard parameters. It also shows what the guards learned (team values, personal tuning, watch points, recent adaptations with the model's reasoning) and can reset memory or the mission. The fairness rules are listed there and cannot be turned off.
+
+Changes save in that browser at once. To apply them to every player, click **Download game.json** and upload it as `config/game.json`; the game reads that file at start and clamps every value to safe limits. The file never contains the learner or its token. The site is static, so `/admin` is hidden, not password-protected: anyone with the address can change settings in their own browser only.
 
 ## API keys
 
-A key typed into the page is saved only in that browser and sent only to that provider. On a public site, do not ask visitors for keys. Instead deploy `lambda/index.mjs` as an AWS Lambda with a Function URL, set `ANTHROPIC_API_KEY` in its environment, and put the Function URL in `HOSTED_LEARNER_ENDPOINT` in `js/config.js`. The hosted build then uses it as the default learner, so visitors get LLM learning with no key. (You can also choose "Own endpoint (proxy)" in the developer view.) The endpoint receives `{system, prompt}` and returns `{"text": "<model reply>"}`.
+A Hugging Face token entered at `/admin` is saved only in that browser and sent only to Hugging Face. It is never written to `config/game.json`, so players who have not entered a token use the local learner.
 
 ## Tests
 
@@ -96,7 +106,7 @@ npm install   # only needed for three.js in browser tests; core tests have no de
 npm test
 ```
 
-40 headless tests. `tests/game.test.mjs` covers the game flow: allowed and refused state changes, levels and lives, corrupt saved missions, and a full mission played by a bot against the real simulation. `tests/core.test.mjs` covers: map connectivity, line of sight through walls and corners, A* optimality against brute-force Dijkstra on 200 random pairs, no corner cutting, the behavior tree's priority and halting, patrol, spot → chase → catch, chase → give-up → search → patrol without flicker, decoys and hearing, escape, and the learner's safety checks.
+53 headless tests. `tests/game.test.mjs` covers the game flow: allowed and refused state changes, levels and lives, corrupt saved missions, and a full mission played by a bot against the real simulation. `tests/core.test.mjs` covers: map connectivity, line of sight through walls and corners, A* optimality against brute-force Dijkstra on 200 random pairs, no corner cutting, the behavior tree's priority and halting, patrol, spot → chase → catch, chase → give-up → search → patrol without flicker, decoys and hearing, escape, and the learner's safety checks.
 
 ## Project layout
 
@@ -111,15 +121,17 @@ js/guard.js         guard perception, behavior tree, movement
 js/world.js         simulation (no drawing code, runs headless)
 js/memory.js        run memory in localStorage
 js/learner.js       prompt, safety checks, local learner
-js/llm.js           Claude / OpenAI / proxy client
+js/llm.js           Hugging Face (open models) client
+js/gameconfig.js    admin settings: deployed config/game.json + local overrides, clamped
+js/admin.js         admin dashboard (admin/index.html, css/admin.css)
+config/game.json    settings for every player (download it from /admin)
 js/render3d.js      Three.js view
 js/minimap.js       2D debug map (A* searched cells, heat map)
 js/game.js          screen state machine and mission rules (headless)
 js/reinforce.js     where reinforcement guards are posted (from run memory)
 js/ui.js            menu, HUD, end screens, developer panel
 js/main.js          input, game loop, wiring
-lambda/index.mjs    optional server-side LLM proxy
-tests/              headless tests (node --test)
+tests/              headless tests (node --test), fairness.test.mjs for per-guard tuning and the fairness rules
 ```
 
 ## Stress test

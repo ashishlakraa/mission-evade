@@ -1,0 +1,80 @@
+/* Admin dashboard (/admin). Builds on the tokens in style.css. */
+body.admin { min-height: 100%; height: auto; }
+.adm-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 2;
+}
+.adm-top .brand { display: flex; align-items: center; gap: 8px; }
+.adm-tag {
+  font-family: var(--font-data); font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  padding: 2px 7px; border-radius: 4px; background: var(--learn-soft); color: var(--learn);
+}
+.adm-play { color: var(--accent); font-weight: 600; text-decoration: none; }
+.adm-play:hover { text-decoration: underline; }
+
+.adm { max-width: 860px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 14px; }
+.adm-intro { margin: 0; color: var(--ink-2); }
+.adm-status { margin: 0; min-height: 1.4em; font-size: 13px; color: var(--ok); font-weight: 600; }
+.adm-foot { margin-top: 4px; }
+.adm code, .adm pre { font-family: var(--font-data); font-size: 12px; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 14px 16px; display: grid; gap: 10px; min-width: 0;
+}
+.card h2 { margin: 0; font-size: 18px; }
+.card h3 { margin: 6px 0 2px; font-size: 14px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.muted { color: var(--muted); font-weight: 500; }
+
+.grid2 { display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.grid2 label { font-size: 13px; color: var(--ink-2); }
+.grid2 input, .grid2 select {
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2);
+  min-width: 0; width: 100%;
+}
+.grid2 input[type="number"] { max-width: 110px; }
+.inline { display: flex; align-items: center; gap: 8px; }
+.card .switch { font-size: 14px; align-items: flex-start; }
+.card .switch input { margin-top: 2px; flex: none; }
+
+.rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+
+.sliders { display: grid; gap: 6px; }
+.slider { display: grid; grid-template-columns: 130px minmax(0, 1fr) 150px; gap: 10px; align-items: center; font-size: 13px; }
+.slider input { width: 100%; accent-color: var(--learn); }
+.s-val { font-family: var(--font-data); font-size: 12px; color: var(--ink-2); }
+
+.mem-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.mem-grid p { margin: 2px 0; font-size: 13px; }
+.mem-grid > div > div { font-size: 13px; }
+.card .kv { margin: 0; display: grid; gap: 2px; }
+.card .kv div { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 2px 0; border-bottom: 1px dashed var(--line); }
+.card .kv dt { color: var(--ink-2); }
+.card .kv dd { margin: 0; font-family: var(--font-data); font-size: 12px; }
+.card .kv div.changed dd { color: var(--learn); font-weight: 600; }
+
+.adapts { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 13px; }
+.a-head { font-family: var(--font-data); font-size: 11px; color: var(--learn); }
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.file-btn { position: relative; display: inline-flex; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file-btn span {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 5px 11px; font-weight: 600; letter-spacing: .02em;
+}
+.file-btn:focus-within span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.preview {
+  margin: 0; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r);
+  max-height: 260px; overflow: auto; white-space: pre;
+}
+
+@media (max-width: 640px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .grid2 label { margin-top: 6px; }
+  .slider { grid-template-columns: minmax(0, 1fr) auto; }
+  .slider input { grid-column: 1 / -1; grid-row: 2; }
+  .mem-grid { grid-template-columns: minmax(0, 1fr); }
+}

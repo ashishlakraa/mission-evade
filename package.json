@@ -6,7 +6,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test tests/core.test.mjs tests/game.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/game.test.mjs tests/fairness.test.mjs",
     "start": "node scripts/serve.mjs 8000"
   },
   "license": "MIT",

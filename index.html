@@ -59,7 +59,7 @@
       <div class="menu-inner">
         <p class="end-kicker">A stealth game with guards that learn</p>
         <h1 class="menu-title"><span class="brand-mark" aria-hidden="true"></span>Mission Evade</h1>
-        <p class="end-sub">Slip past the guards and reach the exit while they are all on patrol. Clear <b>5 security levels</b> before you are caught <b>3 times</b>. After every run the guards study your route, and each new level adds a guard where you were caught or seen.</p>
+        <p class="end-sub">Slip past the guards and reach the exit while they are all on patrol. Clear <b id="ruleLevels">5 security levels</b> before you are caught <b id="ruleLives">3 times</b>. After every run the guards study your route, and each new level adds a guard where you were caught or seen.</p>
         <p class="menu-status" id="menuStatus" hidden></p>
         <div class="menu-actions">
           <button type="button" class="primary" id="btnContinue" hidden>Continue mission <kbd>Enter</kbd></button>
@@ -82,7 +82,7 @@
           <div class="menu-settings">
             <label class="switch"><input type="checkbox" id="menuLearn" checked><span>Guards learn between runs</span></label>
             <label class="switch"><input type="checkbox" id="menuDev"><span>Developer view (behavior tree, learner, debug map)</span></label>
-            <p class="hint">Learner: <b id="menuLearner">Local learner</b>. To use Claude, OpenAI or your own endpoint, open the developer view → Learning.</p>
+            <p class="hint">Learner: <b id="menuLearner">Local learner</b>.</p>
           </div>
         </details>
       </div>
@@ -191,24 +191,12 @@
         <h2 id="h-learn">Learning</h2>
         <label class="switch"><input type="checkbox" id="learnToggle" checked><span>Learning on</span></label>
       </div>
-      <details class="settings" id="llmSettings">
-        <summary>Learner: <b id="learnerName">Local learner (no LLM)</b></summary>
-        <div class="form">
-          <label for="llmProvider">Learner</label>
-          <select id="llmProvider"></select>
-          <label for="llmModel" class="needs-llm">Model</label>
-          <input id="llmModel" class="needs-llm" type="text" autocomplete="off" spellcheck="false">
-          <label for="llmKey" class="needs-key">API key</label>
-          <input id="llmKey" class="needs-key" type="password" autocomplete="off" spellcheck="false" placeholder="Stored only in this browser">
-          <label for="llmEndpoint" class="needs-endpoint">Endpoint URL</label>
-          <input id="llmEndpoint" class="needs-endpoint" type="url" autocomplete="off" spellcheck="false" placeholder="https://…/adapt">
-          <p class="hint" id="llmHint"></p>
-          <button type="button" id="llmSave">Save learner settings</button>
-        </div>
-      </details>
+      <p class="hint learner-line">Learner: <b id="learnerName">Local learner (no LLM)</b>. Set by the game admin.</p>
 
-      <h3 class="sub-h">Guard parameters <span class="muted">value within allowed range</span></h3>
+      <h3 class="sub-h">Team parameters <span class="muted">value within allowed range</span></h3>
       <div class="params" id="params"></div>
+      <h3 class="sub-h">Personal tuning <span class="muted">guards that spotted or caught you</span></h3>
+      <p class="watch" id="tuneList">none yet</p>
       <h3 class="sub-h">Learned watch points</h3>
       <p class="watch" id="watchList">none yet</p>
 

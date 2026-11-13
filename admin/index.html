@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Mission Evade Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/admin.css">
+</head>
+<body class="admin">
+<header class="adm-top">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Mission Evade</span><span class="adm-tag">Admin</span></div>
+  <a class="adm-play" href="../">Open the game ↗</a>
+</header>
+
+<main class="adm">
+  <p class="adm-intro">Settings here are hidden from players. Every change saves in <b>this browser</b> straight away, so you can try it in the game. To apply your settings for <b>every player</b>, download <code>game.json</code> and upload it to <code>config/game.json</code> on the site.</p>
+  <p class="adm-status" id="status" role="status"></p>
+
+  <section class="card" aria-labelledby="h-learner">
+    <h2 id="h-learner">Learner</h2>
+    <div class="grid2">
+      <label for="provider">Learner</label>
+      <select id="provider"></select>
+      <label for="model" class="needs-llm">Model</label>
+      <input id="model" class="needs-llm" type="text" autocomplete="off" spellcheck="false">
+      <label for="apiKey" class="needs-key">Access token</label>
+      <input id="apiKey" class="needs-key" type="password" autocomplete="off" spellcheck="false" placeholder="Saved only in this browser, never exported">
+    </div>
+    <p class="hint" id="learnerHint"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-mission">
+    <h2 id="h-mission">Mission and gameplay</h2>
+    <div class="grid2">
+      <label for="lives">Lives per mission</label>
+      <input id="lives" type="number" step="1">
+      <label for="levels">Security levels</label>
+      <input id="levels" type="number" step="1">
+      <label for="decoys">Decoys per run</label>
+      <input id="decoys" type="number" step="1">
+    </div>
+    <label class="switch"><input type="checkbox" id="learning"><span>Guards learn between runs by default (players can still turn it off)</span></label>
+    <label class="switch"><input type="checkbox" id="devView"><span>Players may open the developer view (behavior tree, learner, debug map)</span></label>
+    <p class="hint">Each security level above 1 adds one reinforcement guard, so there are at most <span id="maxLevels">5</span> levels. Changing lives or levels ends a mission in progress.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-tuning">
+    <h2 id="h-tuning">Guard learning rules</h2>
+    <label class="switch"><input type="checkbox" id="perGuard"><span>Tune each guard that spots or catches the player (base guards and reinforcements)</span></label>
+    <div class="grid2">
+      <label for="maxOffset">Max personal difference from the team</label>
+      <span class="inline"><input id="maxOffset" type="number" step="1"> <span class="muted">steps of each parameter</span></span>
+    </div>
+    <h3>Fairness rules <span class="muted">always on</span></h3>
+    <ul class="rules" id="fairRules"></ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-start">
+    <div class="card-head"><h2 id="h-start">Starting guard parameters</h2><button type="button" id="startReset">Reset to defaults</button></div>
+    <p class="hint">The untrained team values at the start of every mission. Each slider only covers the range the game allows.</p>
+    <div class="sliders" id="startParams"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-memory">
+    <div class="card-head"><h2 id="h-memory">What the guards learned <span class="muted">this browser</span></h2><button type="button" id="memRefresh">Refresh</button></div>
+    <div class="mem-grid">
+      <div><h3>Team parameters</h3><dl class="kv" id="memParams"></dl></div>
+      <div><h3>Personal tuning</h3><div id="memTuning" class="muted">none yet</div>
+        <h3>Watch points</h3><div id="memWatch" class="muted">none yet</div>
+        <h3>Mission</h3><div id="memMission" class="muted">none</div></div>
+    </div>
+    <h3>Recent adaptations</h3>
+    <ol class="adapts" id="memAdapts"></ol>
+    <div class="row">
+      <button type="button" class="danger" id="memReset">Reset learned memory</button>
+      <button type="button" class="danger" id="missionReset">End the mission in progress</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-file">
+    <h2 id="h-file">Config file</h2>
+    <p class="hint" id="fileStatus"></p>
+    <div class="row">
+      <button type="button" class="primary" id="download">Download game.json</button>
+      <label class="file-btn"><input type="file" id="import" accept="application/json,.json"><span>Import game.json</span></label>
+      <button type="button" id="clearLocal">Clear this browser's changes</button>
+    </div>
+    <pre class="preview" id="preview"></pre>
+  </section>
+
+  <p class="hint adm-foot">This page is not linked from the game, but the site is static, so anyone who knows the address can open it. It can only change the game in the browser it is opened in; players are affected only when you upload <code>config/game.json</code>. The learner and its token are never put in that file.</p>
+</main>
+
+<script type="module" src="../js/admin.js"></script>
+</body>
+</html>

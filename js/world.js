@@ -3,21 +3,24 @@
 
 import { Guard } from './guard.js';
 import {
-  PLAYER_SPEED, PLAYER_RADIUS, DECOYS_PER_RUN, DECOY_THROW, DECOY_RING, DECOY_PULSE,
+  PLAYER_SPEED, PLAYER_RADIUS, DECOYS_PER_RUN, DECOY_THROW, DECOY_RING, DECOY_PULSE, paramsFor,
 } from './config.js';
 
 export class World {
   /**
    * @param {object} o
    * @param {import('./grid.js').Grid} o.grid
-   * @param {object} o.params        learnable guard parameters
+   * @param {object} o.params        learnable guard parameters (team values)
    * @param {object[]} o.guardDefs   guard id, name, route
    * @param {object} [o.watchPoints] learned watch points by guard id: {x, y} cells or null
+   * @param {object} [o.guardTuning] learned per-guard offsets from the team values, by guard id
    * @param {number[]} [o.heat]      memory heat map, used to aim watch points
+   * @param {number} [o.decoys]      decoys the player gets this run
    */
-  constructor({ grid, params, guardDefs, watchPoints = {}, heat = null }) {
+  constructor({ grid, params, guardDefs, watchPoints = {}, guardTuning = {}, heat = null, decoys = DECOYS_PER_RUN }) {
     this.grid = grid;
     this.params = { ...params };
+    this.guardTuning = guardTuning || {};
     this.time = 0;
     this.outcome = null;      // null | 'escaped' | 'caught'
     this.caughtBy = null;
@@ -29,7 +32,7 @@ export class World {
     this.watchPoints = resolveWatchPoints(grid, watchPoints, heat);
     this.guards = guardDefs.map((d) => new Guard(d, this));
     this.decoys = [];
-    this.decoysLeft = DECOYS_PER_RUN;
+    this.decoysLeft = decoys;
     this.decoyCooldown = 0;
     this.noises = [];         // short-lived, for drawing sound rings
     this.route = [{ x: grid.start.x, y: grid.start.y, t: 0 }];
@@ -40,6 +43,8 @@ export class World {
   }
 
   addGuard(def) { this.guards.push(new Guard(def, this)); }
+  // The parameters one guard runs with: the team values plus its learned offsets.
+  paramsFor(id) { return paramsFor(this.params, this.guardTuning[id]); }
   removeStressGuards() { this.guards = this.guards.filter((g) => !g.stress); }
 
   step(dt, input = {}) {

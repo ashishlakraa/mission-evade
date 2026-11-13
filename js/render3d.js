@@ -338,7 +338,7 @@ export class Scene3D {
   }
 
   updateCone(g, v, world) {
-    const P = world.params;
+    const P = g.params;
     const half = (P.coneAngle * Math.PI) / 360;
     const range = P.coneRange;
     const pos = v.cone.geometry.attributes.position.array;

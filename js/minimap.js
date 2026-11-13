@@ -82,7 +82,7 @@ export class MiniMap {
     for (const g of world.guards) {
       const col = STATE[g.state] || STATE.PATROL;
       // cone
-      const P = world.params, half = (P.coneAngle * Math.PI) / 360;
+      const P = g.params, half = (P.coneAngle * Math.PI) / 360;
       ctx.beginPath();
       ctx.moveTo(g.x * s, g.y * s);
       for (let i = 0; i <= 24; i++) {

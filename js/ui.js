@@ -2,7 +2,7 @@
 // developer side panel (live behavior tree, guard status, learned parameters, run memory, event log).
 
 import { walk } from './bt.js';
-import { PARAM_SPEC } from './config.js';
+import { PARAM_SPEC, paramsFor } from './config.js';
 import { pathStats } from './astar.js';
 import { PROVIDERS } from './llm.js';
 
@@ -112,13 +112,25 @@ export class Panel {
     const w = mem.watchPoints;
     const box2 = $('watchList');
     box2.textContent = '';
-    const ids = ['A', 'B'].filter((id) => w[id]);
+    const ids = Object.keys(w).filter((id) => w[id]).sort();
     box2.classList.toggle('none', !ids.length);
     if (!ids.length) box2.textContent = 'none yet';
     for (const id of ids) {
       const span = document.createElement('span');
       span.textContent = `Guard ${id} → (${w[id].x}, ${w[id].y})`;
       box2.appendChild(span);
+    }
+    const t = mem.guardTuning || {};
+    const box3 = $('tuneList');
+    box3.textContent = '';
+    const tuned = Object.keys(t).filter((id) => Object.keys(t[id]).length).sort();
+    box3.classList.toggle('none', !tuned.length);
+    if (!tuned.length) box3.textContent = 'none yet';
+    for (const id of tuned) {
+      const eff = paramsFor(mem.params, t[id]);
+      const span = document.createElement('span');
+      span.textContent = `Guard ${id}: ` + Object.keys(t[id]).map((k) => `${PARAM_SPEC[k].label.toLowerCase()} ${fmt(eff[k])} ${PARAM_SPEC[k].unit}`).join(', ');
+      box3.appendChild(span);
     }
   }
 
@@ -137,44 +149,9 @@ export class Panel {
     }
   }
 
+  // Learner settings are configured at /admin; the developer view only names the learner.
   renderSettings(settings) {
-    const sel = $('llmProvider');
-    if (!sel.options.length) {
-      for (const [k, p] of Object.entries(PROVIDERS)) {
-        const o = document.createElement('option');
-        o.value = k; o.textContent = p.label;
-        sel.appendChild(o);
-      }
-    }
-    sel.value = settings.provider;
-    $('llmModel').value = settings.model || '';
-    $('llmKey').value = settings.apiKey || '';
-    $('llmEndpoint').value = settings.endpoint || '';
-    this.syncSettingsForm();
     $('learnerName').textContent = PROVIDERS[settings.provider]?.label || settings.provider;
-  }
-
-  syncSettingsForm() {
-    const p = PROVIDERS[$('llmProvider').value] || PROVIDERS.local;
-    const isLLM = $('llmProvider').value !== 'local';
-    for (const el of document.querySelectorAll('.needs-llm')) el.hidden = !isLLM;
-    for (const el of document.querySelectorAll('.needs-key')) el.hidden = !p.needsKey;
-    for (const el of document.querySelectorAll('.needs-endpoint')) el.hidden = !p.needsEndpoint;
-    $('llmModel').placeholder = p.defaultModel || 'optional';
-    $('llmHint').textContent = !isLLM
-      ? 'The local learner uses the heat map and simple rules. Pick an LLM to have a model read run memory and choose the changes.'
-      : p.needsKey
-        ? 'The key is saved only in this browser and sent only to that provider. For a public site, use your own endpoint instead.'
-        : 'Your endpoint receives {system, prompt} and should return {"text": "<model reply>"}. Keeps keys off the page.';
-  }
-
-  readSettings() {
-    return {
-      provider: $('llmProvider').value,
-      model: $('llmModel').value.trim(),
-      apiKey: $('llmKey').value.trim(),
-      endpoint: $('llmEndpoint').value.trim(),
-    };
   }
 
   // ---------- end of run ----------
@@ -249,6 +226,15 @@ export class Panel {
       li.children[1].className = harderFor(c) ? 'up' : 'down';
       list.appendChild(li);
     }
+    for (const c of rec.guardChanges || []) {
+      const s = PARAM_SPEC[c.key];
+      const li = document.createElement('li');
+      li.innerHTML = '<span></span><span></span>';
+      li.children[0].textContent = `Guard ${c.id} · ${s.label}`;
+      li.children[1].textContent = `${fmt(c.from)} → ${fmt(c.to)} ${s.unit}`;
+      li.children[1].className = harderFor(c) ? 'up' : 'down';
+      list.appendChild(li);
+    }
     for (const w of rec.watchChanges) {
       const li = document.createElement('li');
       li.innerHTML = '<span></span><span></span>';
@@ -256,13 +242,14 @@ export class Panel {
       li.children[1].textContent = w.to ? `→ (${w.to.x}, ${w.to.y})` : 'removed';
       list.appendChild(li);
     }
-    if (!rec.changes.length && !rec.watchChanges.length) {
+    if (!rec.changes.length && !rec.guardChanges?.length && !rec.watchChanges.length) {
       const li = document.createElement('li');
       li.textContent = 'No changes this time.';
       list.appendChild(li);
     }
     const notes = [];
     if (rec.error) notes.push(rec.error);
+    if (rec.fairness) notes.push(`Fairness lock: ${rec.fairness}, so no guard got harder.`);
     if (rec.rejected?.length) notes.push(`Safety checks adjusted ${rec.rejected.length} suggestion${rec.rejected.length > 1 ? 's' : ''}: ${rec.rejected.slice(0, 3).join('; ')}${rec.rejected.length > 3 ? '…' : ''}`);
     note.hidden = !notes.length;
     note.textContent = notes.join(' ');
@@ -388,9 +375,7 @@ export class Panel {
 
 // A change that makes guards tougher shows in red, easier in green.
 function harderFor(c) {
-  const tougherWhenHigher = { coneRange: 1, coneAngle: 1, patrolSpeed: 1, chaseSpeed: 1, giveUpTime: 1, hearingRange: 1, noticeTime: -1, searchTime: 0 };
-  const dir = tougherWhenHigher[c.key] ?? 1;
-  return dir === 0 ? false : (c.to - c.from) * dir > 0;
+  return PARAM_SPEC[c.key].harder * (c.to - c.from) > 0;
 }
 
 const fmt = (v) => String(Math.round(v * 100) / 100);

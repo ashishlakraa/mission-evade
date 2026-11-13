@@ -8,6 +8,7 @@ import { GUARD_DEFS, REINFORCE_IDS, REINFORCE_RULES, PARAM_SPEC } from './config
 
 const RECENT = 0.8;   // a run's weight shrinks by this per newer run
 const WEIGHT = { caught: 3, spotted: 2, route: 0.5 };
+const FROM_MEMORY = new Set(Object.keys(WEIGHT));
 
 // Floor cells ranked by how much memory says about the player there.
 // Each comes with the reason that contributed most: 'caught', 'spotted' or 'route'.
@@ -93,13 +94,21 @@ export function reinforcementDefs(grid, mem, count) {
   const ground = new Map();   // cell index → how many guards walk on or next to it
   for (const g of GUARD_DEFS) tread(grid, ground, walkOf(grid, g.route));
 
+  // A post needs a beat to walk (a fair second cell nearby). Where memory says the player was
+  // caught, spotted or walks, a one-cell post is still worth it: that guard is a sentry and
+  // looks around. Other one-cell posts are a last resort.
   const defs = [];
-  for (let limit = REINFORCE_RULES.maxShared; defs.length < n && limit <= GUARD_DEFS.length + n; limit++) {
+  const tries = [];
+  for (let limit = REINFORCE_RULES.maxShared; limit <= GUARD_DEFS.length + n; limit++) tries.push({ limit, standing: false });
+  tries.push({ limit: GUARD_DEFS.length + n, standing: true });
+  for (const { limit, standing } of tries) {
+    if (defs.length >= n) break;
     const roomy = (c) => (ground.get(grid.idx(c.x, c.y)) || 0) <= limit;
     for (const c of candidates) {
       if (defs.length >= n) break;
       if (postProblem(grid, c, taken) || !roomy(c)) continue;
       const partner = patrolPartner(grid, c, heat, roomy);
+      if (!partner && !standing && !FROM_MEMORY.has(c.reason)) continue;
       const route = partner ? [[c.x, c.y], [partner.x, partner.y]] : [[c.x, c.y]];
       const id = REINFORCE_IDS[defs.length];
       defs.push({ id, name: `Guard ${id}`, reinforcement: true, reason: c.reason, route });

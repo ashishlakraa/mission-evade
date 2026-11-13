@@ -34,6 +34,7 @@ export class Guard {
     this.name = def.name;
     this.stress = !!def.stress;
     this.reinforcement = !!def.reinforcement;
+    this.reason = def.reason || null;
     this.route = def.route.map(([x, y]) => ({ x: x + 0.5, y: y + 0.5 }));
     this.patrol = buildPatrol(this.route, world.watchPoints[this.id] || null, world.grid);
     this.x = this.patrol[0].x;
@@ -53,9 +54,8 @@ export class Guard {
     this.lastSearch = null; // last A* result, for the debug overlay
     this.tickId = 0;
     this.tree = this.buildTree();
+    this.params = world.paramsFor(this.id);   // fixed for the run; learning happens between runs
   }
-
-  get params() { return this.world.params; }
 
   buildTree() {
     this.investigateSteps = memSeq('Investigate steps',
@@ -178,6 +178,8 @@ export class Guard {
     const arrived = this.moveAlong(c.dt, this.params.patrolSpeed);
     if (arrived) {
       if (wp.watch) { bb.pause = WATCH_PAUSE; bb.pauseFace = wp.face; }
+      // A guard with a one-cell post is a sentry: it turns a quarter at a time and looks around.
+      else if (this.patrol.length === 1) { bb.pause = WATCH_PAUSE; bb.pauseFace = this.face + Math.PI / 2; }
       bb.wpIndex = (bb.wpIndex + 1) % this.patrol.length;
     }
     return RUNNING;

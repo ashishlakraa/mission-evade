@@ -1,26 +1,23 @@
-// LLM client used by the learner after each run.
+// LLM client used by the learner after each run. Open-weight models only.
 //
 // Providers:
-//   anthropic — calls the Claude Messages API straight from the browser with the user's own key
-//   openai    — calls the OpenAI Chat Completions API with the user's own key
-//   proxy     — POSTs {system, prompt} to your own endpoint (for example an AWS Lambda
-//               that holds the key server-side). Expects {"text": "..."} back.
+//   huggingface — calls the Hugging Face router (OpenAI-compatible chat completions),
+//                 served by Featherless AI, with the admin's own HF access token
 //
-// Keys entered in the page stay in this browser's localStorage only.
-// For a public deployment use the proxy so no key is ever shipped to visitors.
+// The token entered at /admin stays in that browser's localStorage only.
+
+export const HF_ROUTER_URL = 'https://router.huggingface.co/v1/chat/completions';
+export const DEFAULT_OPEN_MODEL = 'Qwen/Qwen2.5-7B-Instruct:featherless-ai';
 
 export const PROVIDERS = {
-  local:     { label: 'Local learner (no LLM)', needsKey: false },
-  anthropic: { label: 'Claude (Anthropic API)', needsKey: true, defaultModel: 'claude-haiku-5-5' },
-  openai:    { label: 'OpenAI API', needsKey: true, defaultModel: 'gpt-4o-mini' },
-  proxy:     { label: 'Own endpoint (proxy)', needsKey: false, needsEndpoint: true },
+  local:       { label: 'Local learner (no LLM)', needsKey: false },
+  huggingface: { label: 'Open model (Hugging Face / Featherless)', needsKey: true, defaultModel: DEFAULT_OPEN_MODEL },
 };
 
 export function isConfigured(s) {
   const p = PROVIDERS[s.provider];
   if (!p || s.provider === 'local') return false;
   if (p.needsKey && !s.apiKey) return false;
-  if (p.needsEndpoint && !s.endpoint) return false;
   return true;
 }
 
@@ -31,54 +28,26 @@ export async function callLLM(settings, system, prompt, { timeoutMs = 25000 } = 
   const model = settings.model || PROVIDERS[settings.provider]?.defaultModel || '';
   try {
     let text;
-    if (settings.provider === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': settings.apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model, max_tokens: 800, temperature: 0.3, system,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      });
-      if (!res.ok) throw new Error(`Claude API returned ${res.status}: ${await shortBody(res)}`);
-      const j = await res.json();
-      text = (j.content || []).map((b) => b.text || '').join('');
-    } else if (settings.provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    if (settings.provider === 'huggingface') {
+      const res = await fetch(HF_ROUTER_URL, {
         method: 'POST',
         signal: ctrl.signal,
         headers: { 'content-type': 'application/json', authorization: `Bearer ${settings.apiKey}` },
         body: JSON.stringify({
-          model, temperature: 0.3, response_format: { type: 'json_object' },
+          model, max_tokens: 800, temperature: 0.3,
           messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
         }),
       });
-      if (!res.ok) throw new Error(`OpenAI API returned ${res.status}: ${await shortBody(res)}`);
+      if (!res.ok) throw new Error(`Hugging Face returned ${res.status}: ${await shortBody(res)}`);
       const j = await res.json();
       text = j.choices?.[0]?.message?.content || '';
-    } else if (settings.provider === 'proxy') {
-      const res = await fetch(settings.endpoint, {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ system, prompt, model: settings.model || undefined }),
-      });
-      if (!res.ok) throw new Error(`Endpoint returned ${res.status}: ${await shortBody(res)}`);
-      const j = await res.json();
-      text = typeof j.text === 'string' ? j.text : JSON.stringify(j);
     } else {
       throw new Error('No LLM provider selected');
     }
     return { text, ms: Math.round(performance.now() - t0), model };
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(`No reply within ${timeoutMs / 1000} s`);
-    if (e instanceof TypeError) throw new Error('Network request blocked or failed (check the key, the endpoint, or CORS)');
+    if (e instanceof TypeError) throw new Error('Network request blocked or failed (check the token or the connection)');
     throw e;
   } finally {
     clearTimeout(timer);
@@ -90,7 +59,9 @@ async function shortBody(res) {
 }
 
 // Pull the first JSON object out of a model reply (handles ```json fences and stray prose).
+// Reasoning models (Qwen3 and others) may wrap their thoughts in <think>…</think> first.
 export function extractJson(text) {
+  text = String(text).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   try { return JSON.parse(text); } catch { /* fall through */ }
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');

@@ -10,20 +10,26 @@ import { MiniMap } from './minimap.js';
 import { Panel } from './ui.js';
 import { Game, State, scoreRun } from './game.js';
 import {
-  loadMemory, saveMemory, clearMemory, buildRunRecord, recordRun, loadSettings, saveSettings,
+  loadMemory, saveMemory, clearMemory, buildRunRecord, recordRun, loadSettings,
   loadMission, saveMission, loadPrefs, savePrefs,
 } from './memory.js';
-import { proposeAdaptation, applyAdaptation } from './learner.js';
+import { proposeAdaptation, applyAdaptation, watchPointsFor } from './learner.js';
 import { PROVIDERS, isConfigured } from './llm.js';
+import { loadGameConfig, tuningOptions } from './gameconfig.js';
 
 const $ = (id) => document.getElementById(id);
 const STEP = 1 / 60;
 
+// Settings from the admin dashboard (/admin): mission rules, decoys, learner rules.
+const cfg = await loadGameConfig();
+const rules = { lives: cfg.lives, levels: cfg.levels };
+
 const grid = new Grid(MAP);
-let mem = loadMemory(grid);
+let mem = loadMemory(grid, cfg.startParams, cfg.learning);
 let settings = loadSettings();
 const prefs = loadPrefs();
-const game = new Game(loadMission());
+if (!cfg.devView) prefs.dev = false;
+const game = new Game(missionUnderRules(loadMission()));
 const panel = new Panel();
 const scene = new Scene3D($('stage'), grid);
 const minimap = new MiniMap($('minimap'), grid);
@@ -37,6 +43,11 @@ let learnJob = 0;         // id of the latest learner call, so stale replies are
 let stressCount = 0;
 let heatVersion = 0;
 let contextLost = false;
+
+// A saved mission only continues if the admin has not changed the rules since.
+function missionUnderRules(m) {
+  return m && m.levels === rules.levels && m.maxLives === rules.lives ? m : null;
+}
 
 // ---------- screens ----------
 
@@ -62,13 +73,11 @@ function showMenu() {
 
 function newMission() {
   // A new mission starts from untrained guards, so every mission is a fair comparison.
-  const wasOn = mem.learning;
-  mem = clearMemory(grid);
-  mem.learning = wasOn;
+  mem = clearMemory(grid, cfg.startParams, mem.learning);
   saveMemory(mem);
   dropLearner();
   heatVersion++;
-  game.startMission();
+  game.startMission(rules);
   saveMission(game.mission);
   startRun();
 }
@@ -94,8 +103,11 @@ function guardDefsForLevel() {
 }
 
 function newWorld() {
+  const guardDefs = guardDefsForLevel();
   const w = new World({
-    grid, params: mem.params, guardDefs: guardDefsForLevel(), watchPoints: mem.watchPoints, heat: mem.heat,
+    grid, params: mem.params, guardDefs, heat: mem.heat, decoys: cfg.decoys,
+    watchPoints: watchPointsFor(grid, guardDefs, mem.watchPoints),
+    guardTuning: cfg.perGuardTuning ? mem.guardTuning : {},
   });
   for (let i = 0; i < stressCount; i++) w.addGuard(stressGuardDef(i));
   return w;
@@ -160,9 +172,9 @@ async function finishRun() {
   });
   let record = null;
   try {
-    const proposal = await proposeAdaptation(target, run, grid, settings);
+    const proposal = await proposeAdaptation(target, run, grid, settings, tuningOptions(cfg));
     if (job === learnJob && target === mem) {
-      record = applyAdaptation(mem, proposal, grid, run);
+      record = applyAdaptation(mem, proposal, grid, run, tuningOptions(cfg));
       saveMemory(mem);
     }
   } catch (e) {
@@ -272,7 +284,7 @@ addEventListener('keydown', (e) => {
   if (k === 'g') toggle('optPaths');
   if (k === 'h') toggle('optHeat');
   if (k === 'v') setView(scene.view === 'top' ? 'angled' : 'top');
-  if (k === '`') setDev(!prefs.dev);
+  if (k === '`' && cfg.devView) setDev(!prefs.dev);
 });
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => { keys.clear(); for (const k in pad) pad[k] = 0; });
@@ -308,7 +320,8 @@ function setView(v) {
   $('viewTop').setAttribute('aria-pressed', String(v === 'top'));
 }
 function setDev(on) {
-  prefs.dev = on;
+  prefs.dev = on && cfg.devView;
+  on = prefs.dev;
   savePrefs(prefs);
   document.body.classList.toggle('dev', on);
   $('btnDev').setAttribute('aria-pressed', String(on));
@@ -365,17 +378,6 @@ $('stressAdd').addEventListener('click', () => addStress(5));
 $('stressClear').addEventListener('click', clearStress);
 $('learnToggle').addEventListener('change', (e) => setLearning(e.target.checked));
 
-$('llmProvider').addEventListener('change', () => panel.syncSettingsForm());
-$('llmSave').addEventListener('click', () => {
-  settings = panel.readSettings();
-  saveSettings(settings);
-  panel.renderSettings(settings);
-  updateLearnerBadge();
-  $('llmHint').textContent = isConfigured(settings) || settings.provider === 'local'
-    ? 'Saved. The learner runs after your next run ends.'
-    : 'Saved, but this learner still needs a key or an endpoint. Until then the local learner is used.';
-});
-
 $('memReset').addEventListener('click', () => {
   const btn = $('memReset');
   if (btn.dataset.confirm !== '1') {
@@ -386,9 +388,7 @@ $('memReset').addEventListener('click', () => {
   }
   btn.dataset.confirm = '';
   btn.textContent = 'Reset memory';
-  const wasOn = mem.learning;
-  mem = clearMemory(grid);
-  mem.learning = wasOn;
+  mem = clearMemory(grid, cfg.startParams, mem.learning);
   saveMemory(mem);
   dropLearner();
   heatVersion++;
@@ -464,6 +464,10 @@ canvas.addEventListener('webglcontextrestored', () => { contextLost = false; });
 // ---------- boot ----------
 
 panel.renderSettings(settings);
+$('ruleLevels').textContent = `${rules.levels} security level${rules.levels === 1 ? '' : 's'}`;
+$('ruleLives').textContent = rules.lives === 1 ? 'once' : `${rules.lives} times`;
+$('btnDev').hidden = !cfg.devView;
+$('menuDev').closest('label').hidden = !cfg.devView;
 setDev(prefs.dev);
 setLearning(mem.learning);
 $('stage').tabIndex = -1;
@@ -473,5 +477,5 @@ requestAnimationFrame(frame);
 // Handy for the console and for automated checks.
 window.missionEvade = {
   get world() { return world; }, get memory() { return mem; }, get game() { return game; },
-  startRun, newMission, showMenu, scene,
+  config: cfg, startRun, newMission, showMenu, scene,
 };
