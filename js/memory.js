@@ -2,13 +2,13 @@
 // they learned between runs and page reloads. Storage can be unavailable
 // (private windows, blocked site data); the game then keeps memory in RAM.
 
-import { DEFAULT_PARAMS, MAP_ID } from './config.js';
+import { DEFAULT_PARAMS, MAP_ID, STORAGE_PREFIX } from './config.js';
 import { PROVIDERS } from './llm.js';
 
-const KEY = `mission-evade:memory:${MAP_ID}:v1`;
-const SETTINGS_KEY = 'mission-evade:llm:v1';
-const MISSION_KEY = `mission-evade:mission:${MAP_ID}:v1`;
-const PREFS_KEY = 'mission-evade:prefs:v1';
+const KEY = `${STORAGE_PREFIX}:memory:${MAP_ID}:v1`;
+export const SETTINGS_KEY = `${STORAGE_PREFIX}:llm:v1`;
+const MISSION_KEY = `${STORAGE_PREFIX}:mission:${MAP_ID}:v1`;
+const PREFS_KEY = `${STORAGE_PREFIX}:prefs:v1`;
 const MAX_RUNS = 40;
 const HEAT_DECAY = 0.8; // older runs fade, recent habits count most
 

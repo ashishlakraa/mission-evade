@@ -7,10 +7,10 @@
 // The learner and its access token are never part of this config: they stay in the
 // learner settings of the admin's browser (see memory.js).
 
-import { PARAM_SPEC, DEFAULT_PARAMS, DECOYS_PER_RUN, GUARD_TUNING, REINFORCE_IDS } from './config.js';
+import { PARAM_SPEC, DEFAULT_PARAMS, DECOYS_PER_RUN, GUARD_TUNING, REINFORCE_IDS, STORAGE_PREFIX } from './config.js';
 import { MISSION_RULES } from './game.js';
 
-export const ADMIN_KEY = 'mission-evade:admin:v1';
+export const ADMIN_KEY = `${STORAGE_PREFIX}:admin:v1`;
 
 export const CONFIG_LIMITS = {
   lives: { min: 1, max: 9 },

@@ -30,11 +30,13 @@ Then open http://localhost:8000. You need Node.js or Python 3 for the local serv
 
 Opening `index.html` by double-click does not work, because browsers block ES modules from `file://`.
 
-**Deploy to S3** (static website hosting on):
+**Deploy to S3** (static website hosting on). Each release has its own folder in the bucket: the final version in `v1/`, the Assignment 5 beta in `beta/` (deployed from the `v0.5.0-beta` tag), and a small landing page at the root linking to both.
 
 ```bash
-aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv" --exclude "start.*" --exclude ".gitattributes" --exclude "playtest-out/*"
+aws s3 sync . s3://<your-bucket>/v1 --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv" --exclude "start.*" --exclude ".gitattributes" --exclude "playtest-out/*"
 ```
+
+Each release saves its browser data under its own prefix (`STORAGE_PREFIX` in `js/config.js`), so releases on the same site never share learned memory, missions or settings.
 
 `--cache-control no-cache` matters: the game is plain ES modules, and without it browsers may keep some old modules after an update and run a mix of old and new code. `npm start` uses `scripts/serve.mjs`, which sends the same header locally.
 

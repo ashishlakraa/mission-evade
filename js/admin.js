@@ -12,7 +12,7 @@ import {
   clearLocalOverrides, mergeConfig,
 } from './gameconfig.js';
 import {
-  loadMemory, saveMemory, clearMemory, loadSettings, saveSettings, loadMission, saveMission,
+  loadMemory, saveMemory, clearMemory, loadSettings, saveSettings, loadMission, saveMission, SETTINGS_KEY,
 } from './memory.js';
 
 const $ = (id) => document.getElementById(id);
@@ -90,7 +90,7 @@ function onLearnerChange() {
 
 // saveSettings swallows storage errors; check that the value actually landed.
 function saveSettingsOk() {
-  try { return JSON.parse(localStorage.getItem('mission-evade:llm:v1') || 'null')?.provider === settings.provider; } catch { return false; }
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null')?.provider === settings.provider; } catch { return false; }
 }
 
 $('provider').addEventListener('change', onLearnerChange);

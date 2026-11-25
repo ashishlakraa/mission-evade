@@ -3,6 +3,10 @@
 
 export const MAP_ID = 'facility-02';
 
+// Prefix for everything saved in the browser. The beta (v0.5.0) used 'mission-evade'
+// and is still hosted on the same site, so each release keeps its own saved data.
+export const STORAGE_PREFIX = 'mission-evade-v1';
+
 // Legend: # wall   . floor   S player start   E exit
 // x runs left→right (columns), y runs top→bottom (rows).
 export const MAP = [
