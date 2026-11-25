@@ -13,7 +13,7 @@ const port = Number(process.argv[2]) || 8000;
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon', '.csv': 'text/csv; charset=utf-8',
+  '.ico': 'image/x-icon', '.csv': 'text/csv; charset=utf-8', '.glb': 'model/gltf-binary', '.txt': 'text/plain; charset=utf-8',
 };
 
 createServer(async (req, res) => {
@@ -29,4 +29,7 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404, { 'cache-control': 'no-cache' }).end('Not found');
   }
-}).listen(port, () => console.log(`Mission Evade on http://localhost:${port}`));
+}).on('error', (e) => {
+  console.error(e.code === 'EADDRINUSE' ? `Port ${port} is already in use. Try: node scripts/serve.mjs ${port + 1}` : e.message);
+  process.exit(1);
+}).listen(port, () => console.log(`Mission Evade on http://localhost:${port}  (Ctrl+C to stop)`));

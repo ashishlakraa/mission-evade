@@ -7,6 +7,8 @@ import { GUARD_RADIUS } from './config.js';
 
 const WALL_H = 0.62;
 const CONE_SEGMENTS = 44;
+const CLIP_PACE = { Walk: 1.5, Run: 3.0 };   // cells per second a clip was made for
+const RUN_FROM = 2.05;                       // above patrol speed's maximum
 
 export const STATE_COLORS = {
   PATROL: 0x3f8ee8,
@@ -33,9 +35,14 @@ const C = {
 };
 
 export class Scene3D {
-  constructor(host, grid) {
+  // assets: loaded models and textures (assets.js); anything missing falls back to plain shapes
+  constructor(host, grid, assets = { models: {}, textures: {} }) {
     this.host = host;
     this.grid = grid;
+    this.assets = assets;
+    this.tmp = new THREE.Vector3();
+    this.lastTime = null;
+    this.epoch = 0;   // how many times the GPU context was rebuilt
     this.ox = -grid.w / 2;
     this.oz = -grid.h / 2;
     this.view = 'angled';
@@ -65,6 +72,7 @@ export class Scene3D {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(host);
     this.resize();
+    this.prewarm();
   }
 
   // grid → scene
@@ -87,7 +95,7 @@ export class Scene3D {
     const g = this.grid;
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(g.w, g.h),
-      new THREE.MeshStandardMaterial({ color: C.floor, roughness: 0.95 }),
+      this.surface('floor', C.floor, { roughness: 0.95 }, [g.w / 2, g.h / 2]),   // the texture covers 2x2 cells
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
@@ -98,18 +106,18 @@ export class Scene3D {
     for (let y = 0; y <= g.h; y++) lines.push(this.sx(0), 0.004, this.sz(y), this.sx(g.w), 0.004, this.sz(y));
     const lg = new THREE.BufferGeometry();
     lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-    this.scene.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: C.gridLine, transparent: true, opacity: 0.55 })));
+    this.scene.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: C.gridLine, transparent: true, opacity: this.assets.textures.floor ? 0.18 : 0.55 })));
 
     // Walls: one instanced box mesh, with a lighter cap on top for readability from above.
     const wallCells = [];
     for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) if (g.isWall(x, y)) wallCells.push([x, y]);
     const walls = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1, WALL_H, 1),
-      new THREE.MeshStandardMaterial({ color: C.wall, roughness: 0.8 }),
+      this.surface('wall', C.wall, { roughness: 0.7, metalness: 0.15 }),
       wallCells.length,
     );
     const caps = new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(0.98, 0.98).rotateX(-Math.PI / 2),
+      new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
       new THREE.MeshStandardMaterial({ color: C.wallTop, roughness: 0.7 }),
       wallCells.length,
     );
@@ -143,6 +151,7 @@ export class Scene3D {
     beacon.position.set(this.sx(g.exit.x + 0.5), 0.8, this.sz(g.exit.y + 0.5));
     this.scene.add(beacon);
     this.exitBeacon = beacon;
+    this.buildDoor();
 
     // Heat map tiles (memory), one instance per floor cell.
     this.freeCells = g.freeCells();
@@ -161,6 +170,78 @@ export class Scene3D {
     this.heatVersion = -1;
   }
 
+  // A textured material, or a plain colour if the texture did not load.
+  surface(name, color, props = {}, repeat = null) {
+    const map = this.assets.textures[name], normalMap = this.assets.textures[`${name}_n`];
+    if (repeat) for (const t of [map, normalMap]) t?.repeat.set(...repeat);
+    return new THREE.MeshStandardMaterial({ ...props, color: map ? 0xffffff : color, map: map || null, normalMap: normalMap || null });
+  }
+
+  // The exit door stands against a wall of the exit cell and opens while the exit is open.
+  buildDoor() {
+    const src = this.assets.models['exit-door'];
+    if (!src) return;
+    const e = this.grid.exit;
+    // East, then west, then north, then south: whichever side of the exit cell is a wall.
+    const [dx, dy] = [[1, 0], [-1, 0], [0, -1], [0, 1]].find(([x, y]) => this.grid.isWall(e.x + x, e.y + y)) || [1, 0];
+    const door = src.scene.clone(true);
+    const lamp = new THREE.MeshBasicMaterial({ color: C.exit });
+    const panel = this.surface('door', 0x7b8592, { roughness: 0.55, metalness: 0.3 });
+    const parts = {};
+    door.traverse((o) => {
+      parts[o.name] = o;
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      if (o.material.name === 'Lamp') o.material = lamp;
+      if (o.material.name === 'Panel') o.material = panel;
+    });
+    door.position.set(this.sx(e.x + 0.5 + dx * 0.44), 0, this.sz(e.y + 0.5 + dy * 0.44));
+    door.rotation.y = Math.atan2(dy, -dx);   // the model faces +x: turn it to face into the room
+    this.scene.add(door);
+    const { PanelL, PanelR } = parts;
+    if (PanelL && PanelR) this.door = { PanelL, PanelR, lamp, zL: PanelL.position.z, zR: PanelR.position.z, open: 1 };
+  }
+
+  // A character: a cloned model with its own animation mixer, or a plain body.
+  makeActor(name, color, radius, height) {
+    const src = this.assets.models[name];
+    if (!src) return { grp: this.makeBody(color, radius, height), mixer: null, visor: null };
+    const grp = src.scene.clone(true);   // rigid parts, so a plain clone shares geometry safely
+    let visor = null;
+    grp.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      if (o.material.name === 'Visor') { o.material = o.material.clone(); visor = o.material; }
+    });
+    const mixer = new THREE.AnimationMixer(grp);
+    const clips = {};
+    for (const c of src.animations) {
+      clips[c.name] = mixer.clipAction(c);
+      if (c.name === 'Idle') clips[c.name].play();
+    }
+    return { grp, mixer, visor, clips, clip: 'Idle', x: null, y: null, pace: 0 };
+  }
+
+  // Pick the clip from how fast the body really moves, and match the clip's pace to it.
+  animate(a, x, y, dt) {
+    if (!a.mixer || dt <= 0) return;
+    const moved = a.x == null ? 0 : Math.hypot(x - a.x, y - a.y);
+    a.x = x;
+    a.y = y;
+    if (moved > 1) return;               // a new run put the body somewhere else
+    a.pace += (moved / dt - a.pace) * Math.min(1, dt * 14);
+    const want = a.pace < 0.25 ? 'Idle' : a.pace > RUN_FROM ? 'Run' : 'Walk';
+    if (want !== a.clip && a.clips[want]) {
+      const from = a.clips[a.clip], to = a.clips[want];
+      to.reset().setEffectiveWeight(1).play();
+      from?.crossFadeTo(to, 0.14, false);
+      a.clip = want;
+    }
+    const pace = CLIP_PACE[a.clip];
+    if (pace && a.clips[a.clip]) a.clips[a.clip].setEffectiveTimeScale(Math.max(0.5, a.pace / pace));
+    a.mixer.update(dt);
+  }
+
   buildDynamic() {
     const body = (color, radius, height) => {
       const grp = new THREE.Group();
@@ -175,18 +256,21 @@ export class Scene3D {
     };
     this.makeBody = body;
 
-    this.playerMesh = body(C.player, 0.27, 0.62);
-    this.scene.add(this.playerMesh);
+    this.player = this.makeActor('player', C.player, 0.27, 0.62);
+    this.scene.add(this.player.grp);
 
     this.decoyMeshes = [];
     this.noiseRings = [];
   }
 
   makeGuardView(g) {
-    const grp = this.makeBody(C.guard, 0.3, 0.68);
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.12), new THREE.MeshStandardMaterial({ color: 0x1b1f25 }));
-    nose.position.set(0.24, 0.98, 0);
-    grp.add(nose);
+    const actor = this.makeActor('guard', C.guard, 0.3, 0.68);
+    const grp = actor.grp;
+    if (!actor.mixer) {   // a plain body needs a nose to show where it looks
+      const nose = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.12), new THREE.MeshStandardMaterial({ color: 0x1b1f25 }));
+      nose.position.set(0.24, 0.98, 0);
+      grp.add(nose);
+    }
     this.scene.add(grp);
 
     const coneGeo = new THREE.BufferGeometry();
@@ -251,12 +335,21 @@ export class Scene3D {
     label.innerHTML = '<span class="gname"></span><span class="gstate"></span>';
     this.labels.appendChild(label);
 
-    return { grp, cone, edge, path, route, watch, label, lastState: null };
+    return { actor, grp, cone, edge, path, route, watch, label, lastState: null, epoch: this.epoch };
   }
 
+  // Every run builds new guard views, so free the GPU memory of the old ones.
   disposeGuardView(v) {
+    v.actor.mixer?.stopAllAction();
+    v.actor.mixer?.uncacheRoot(v.grp);
     for (const o of [v.grp, v.cone, v.edge, v.path, v.route, v.watch]) if (o) this.scene.remove(o);
     v.label.remove();
+    if (v.epoch !== this.epoch) return;   // its GPU objects went with the lost context; deleting them is an error
+    const owned = v.actor.mixer ? [] : [v.grp];   // a model's geometry is shared with every other guard
+    for (const o of [...owned, v.cone, v.edge, v.path, v.route, v.watch]) {
+      o?.traverse((m) => { m.geometry?.dispose(); m.material?.dispose(); });
+    }
+    v.actor.visor?.dispose();
   }
 
   // Rebuild guard views when the world changes (new run, stress guards added or removed).
@@ -289,24 +382,38 @@ export class Scene3D {
     const { showPaths, showRoutes, showHeat } = opts;
     this.heatMesh.visible = !!showHeat;
     this.syncGuards(world);
+    const dt = this.lastTime == null ? 0 : Math.min(0.1, time - this.lastTime);
+    this.lastTime = time;
 
     const p = world.player;
-    this.playerMesh.position.set(this.sx(p.x), 0, this.sz(p.y));
-    this.playerMesh.rotation.y = -p.face;
+    this.player.grp.position.set(this.sx(p.x), 0, this.sz(p.y));
+    this.player.grp.rotation.y = -p.face;
+    this.animate(this.player, p.x, p.y, dt);
     // The exit glows green while open, red while a guard is on alert.
     const exitColor = world.exitOpen ? C.exit : C.exitLocked;
     this.exitTile.material.color.setHex(exitColor);
     this.exitBeacon.material.color.setHex(exitColor);
     this.exitBeacon.material.opacity = 0.14 + Math.sin(time * 3) * 0.06;
+    if (this.door) {   // each panel slides into its side of the frame
+      const d = this.door;
+      d.open += ((world.exitOpen ? 1 : 0) - d.open) * Math.min(1, dt * 7);
+      const s = 1 - 0.8 * d.open;
+      d.PanelL.scale.z = d.PanelR.scale.z = s;
+      d.PanelL.position.z = d.zL - 0.21 * (1 - s);
+      d.PanelR.position.z = d.zR + 0.21 * (1 - s);
+      d.lamp.color.setHex(exitColor);
+    }
 
     for (const g of world.guards) {
       const v = this.guardViews.get(g);
       v.grp.position.set(this.sx(g.x), 0, this.sz(g.y));
       v.grp.rotation.y = -g.face;
+      this.animate(v.actor, g.x, g.y, dt);
       this.updateCone(g, v, world);
       const col = STATE_COLORS[g.state] || STATE_COLORS.PATROL;
       v.cone.material.color.setHex(col);
       v.edge.material.color.setHex(col);
+      if (v.actor.visor) { v.actor.visor.color.setHex(col); v.actor.visor.emissive.setHex(col); }
       v.cone.material.opacity = g.state === 'CHASE' ? 0.5 : g.state === 'PATROL' ? 0.36 : 0.44;
 
       v.path.visible = !!showPaths && g.bb.path.length > 0;
@@ -359,12 +466,32 @@ export class Scene3D {
     v.edge.geometry.computeBoundingSphere();
   }
 
+  makeDecoy() {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshStandardMaterial({ color: 0xf2c94c, emissive: 0x6b4f00 }));
+    m.castShadow = true;
+    this.scene.add(m);
+    return m;
+  }
+
+  makeRing() {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 48).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xf2c94c, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    ring.renderOrder = 5;
+    this.scene.add(ring);
+    return ring;
+  }
+
+  // Draw a decoy and a ring once while loading, so their shaders are ready before the first throw.
+  prewarm() {
+    this.decoyMeshes.push(this.makeDecoy());
+    this.noiseRings.push(this.makeRing());
+    this.render();
+    this.decoyMeshes[0].visible = this.noiseRings[0].visible = false;
+  }
+
   updateDecoys(world, time) {
     while (this.decoyMeshes.length < world.decoys.length) {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshStandardMaterial({ color: 0xf2c94c, emissive: 0x6b4f00 }));
-      m.castShadow = true;
-      this.scene.add(m);
-      this.decoyMeshes.push(m);
+      this.decoyMeshes.push(this.makeDecoy());
     }
     this.decoyMeshes.forEach((m, i) => {
       const d = world.decoys[i];
@@ -376,11 +503,7 @@ export class Scene3D {
     });
 
     while (this.noiseRings.length < world.noises.length) {
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 48).rotateX(-Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0xf2c94c, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
-      ring.renderOrder = 5;
-      this.scene.add(ring);
-      this.noiseRings.push(ring);
+      this.noiseRings.push(this.makeRing());
     }
     this.noiseRings.forEach((r, i) => {
       const n = world.noises[i];
@@ -396,7 +519,7 @@ export class Scene3D {
   }
 
   placeLabel(el, x, y, h) {
-    const v = new THREE.Vector3(this.sx(x), h, this.sz(y)).project(this.camera);
+    const v = this.tmp.set(this.sx(x), h, this.sz(y)).project(this.camera);
     const w = this.host.clientWidth, hh = this.host.clientHeight;
     el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * hh}px) translate(-50%, -100%)`;
   }

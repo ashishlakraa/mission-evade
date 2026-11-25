@@ -156,6 +156,7 @@ export class Guard {
     this.tickId++;
     this.bb.pathAge += dt;
     const ctx = { dt, tickId: this.tickId };
+    const before = this.state;
     this.tree.tick(ctx);
     for (const branch of this.tree.children) {
       if (branch.tickId === this.tickId && branch.status !== FAILURE) {
@@ -163,6 +164,7 @@ export class Guard {
         break;
       }
     }
+    if (this.state !== before) this.world.emit('state', { x: this.x, y: this.y, guard: this.id, from: before, to: this.state });
   }
 
   actPatrol(c) {

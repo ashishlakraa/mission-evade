@@ -3,7 +3,7 @@
 
 import { Guard } from './guard.js';
 import {
-  PLAYER_SPEED, PLAYER_RADIUS, DECOYS_PER_RUN, DECOY_THROW, DECOY_RING, DECOY_PULSE, paramsFor,
+  PLAYER_SPEED, PLAYER_RADIUS, DECOYS_PER_RUN, DECOY_THROW, DECOY_RING, DECOY_PULSE, PARAM_SPEC, paramsFor,
 } from './config.js';
 
 export class World {
@@ -16,11 +16,14 @@ export class World {
    * @param {object} [o.guardTuning] learned per-guard offsets from the team values, by guard id
    * @param {number[]} [o.heat]      memory heat map, used to aim watch points
    * @param {number} [o.decoys]      decoys the player gets this run
+   * @param {object} [o.reinforcementEase] difficulty easing for reinforcements, in PARAM_SPEC steps
    */
-  constructor({ grid, params, guardDefs, watchPoints = {}, guardTuning = {}, heat = null, decoys = DECOYS_PER_RUN }) {
+  constructor({ grid, params, guardDefs, watchPoints = {}, guardTuning = {}, heat = null, decoys = DECOYS_PER_RUN, reinforcementEase = {} }) {
     this.grid = grid;
     this.params = { ...params };
     this.guardTuning = guardTuning || {};
+    this.reinforcements = new Set(guardDefs.filter((d) => d.reinforcement).map((d) => d.id));
+    this.ease = Object.fromEntries(Object.entries(reinforcementEase).map(([k, steps]) => [k, steps * PARAM_SPEC[k].step]));
     this.time = 0;
     this.outcome = null;      // null | 'escaped' | 'caught'
     this.caughtBy = null;
@@ -39,12 +42,17 @@ export class World {
     this.detections = [];
     this.decoyLog = [];
     this.log = [];
+    this.events = [];         // what just happened, for sound (drained by the page every frame)
     this.nextId = 1;
   }
 
   addGuard(def) { this.guards.push(new Guard(def, this)); }
   // The parameters one guard runs with: the team values plus its learned offsets.
-  paramsFor(id) { return paramsFor(this.params, this.guardTuning[id]); }
+  // Reinforcements on the last levels are also eased (config.js, LEVEL_TUNING).
+  paramsFor(id) {
+    const own = paramsFor(this.params, this.guardTuning[id]);
+    return this.reinforcements.has(id) ? paramsFor(own, this.ease) : own;
+  }
   removeStressGuards() { this.guards = this.guards.filter((g) => !g.stress); }
 
   step(dt, input = {}) {
@@ -62,6 +70,7 @@ export class World {
       if (Math.floor(p.x) === e.x && Math.floor(p.y) === e.y) {
         this.outcome = 'escaped';
         this.note('Player reached the exit');
+        this.emit('escaped');
       }
     }
     this.noises = this.noises.filter((n) => this.time - n.t < 1.6);
@@ -72,7 +81,9 @@ export class World {
     const open = this.guards.every((g) => g.stress || g.state === 'PATROL');
     if (open === this.exitOpen) return;
     this.exitOpen = open;
-    if (!this.outcome) this.note(open ? 'Exit open: every guard is back on patrol' : 'Exit locked: a guard is on alert');
+    if (this.outcome) return;
+    this.note(open ? 'Exit open: every guard is back on patrol' : 'Exit locked: a guard is on alert');
+    this.emit(open ? 'exit-open' : 'exit-locked', { x: this.grid.exit.x + 0.5, y: this.grid.exit.y + 0.5 });
   }
 
   movePlayer(dt, { dx = 0, dy = 0 } = {}) {
@@ -112,6 +123,7 @@ export class World {
     this.decoyCooldown = 0.8;
     this.decoyLog.push({ x: Math.floor(d.x), y: Math.floor(d.y), t: round1(this.time) });
     this.note(`Decoy thrown to (${Math.floor(d.x)}, ${Math.floor(d.y)})`);
+    this.emit('throw', { x: p.x, y: p.y });
     return true;
   }
 
@@ -126,6 +138,7 @@ export class World {
       }
       if (d.landed && this.time < d.ringUntil && this.time >= d.nextRing) {
         d.nextRing += DECOY_PULSE;
+        this.emit('ring', { x: d.x, y: d.y });
         this.emitNoise({ x: d.x, y: d.y, kind: 'decoy', source: d.id, until: d.ringUntil });
       }
     }
@@ -145,6 +158,7 @@ export class World {
     const p = this.player;
     this.detections.push({ x: Math.floor(p.x), y: Math.floor(p.y), t: round1(this.time), guard: g.id });
     this.note(`${g.name} spotted the player — chasing`);
+    this.emit('spotted', { x: g.x, y: g.y, guard: g.id });
     this.emitNoise({ x: p.x, y: p.y, kind: 'radio call', from: g });
   }
 
@@ -153,6 +167,7 @@ export class World {
     this.outcome = 'caught';
     this.caughtBy = g.id;
     this.note(`${g.name} caught the player`);
+    this.emit('caught', { x: g.x, y: g.y, guard: g.id });
   }
 
   recordRoute() {
@@ -161,6 +176,14 @@ export class World {
     const last = this.route[this.route.length - 1];
     if (last.x !== cx || last.y !== cy) this.route.push({ x: cx, y: cy, t: round1(this.time) });
   }
+
+  // Sound cues only: nothing in the simulation reads these back.
+  emit(type, data = {}) {
+    this.events.push({ type, t: this.time, ...data });
+    if (this.events.length > 256) this.events.shift();   // nobody is listening (headless runs)
+  }
+
+  drainEvents() { return this.events.splice(0); }
 
   note(text) { this.log.push({ t: round1(this.time), text }); }
 }

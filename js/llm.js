@@ -1,17 +1,17 @@
 // LLM client used by the learner after each run. Open-weight models only.
 //
 // Providers:
-//   huggingface — calls the Hugging Face router (OpenAI-compatible chat completions),
-//                 served by Featherless AI, with the admin's own HF access token
+//   huggingface — calls the Hugging Face router (OpenAI-compatible chat completions) with the
+//                 admin's own HF access token; the router picks a provider that serves the model
 //
 // The token entered at /admin stays in that browser's localStorage only.
 
 export const HF_ROUTER_URL = 'https://router.huggingface.co/v1/chat/completions';
-export const DEFAULT_OPEN_MODEL = 'Qwen/Qwen2.5-7B-Instruct:featherless-ai';
+export const DEFAULT_OPEN_MODEL = 'Qwen/Qwen3.5-9B:cheapest';   // ":cheapest" lets the router pick the cheapest provider
 
 export const PROVIDERS = {
   local:       { label: 'Local learner (no LLM)', needsKey: false },
-  huggingface: { label: 'Open model (Hugging Face / Featherless)', needsKey: true, defaultModel: DEFAULT_OPEN_MODEL },
+  huggingface: { label: 'Open model (Hugging Face)', needsKey: true, defaultModel: DEFAULT_OPEN_MODEL },
 };
 
 export function isConfigured(s) {
@@ -21,7 +21,7 @@ export function isConfigured(s) {
   return true;
 }
 
-export async function callLLM(settings, system, prompt, { timeoutMs = 25000 } = {}) {
+export async function callLLM(settings, system, prompt, { timeoutMs = 45000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const t0 = performance.now();
@@ -35,6 +35,7 @@ export async function callLLM(settings, system, prompt, { timeoutMs = 25000 } = 
         headers: { 'content-type': 'application/json', authorization: `Bearer ${settings.apiKey}` },
         body: JSON.stringify({
           model, max_tokens: 800, temperature: 0.3,
+          reasoning_effort: 'none',   // no reasoning output: it would use up the tokens before the answer
           messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
         }),
       });

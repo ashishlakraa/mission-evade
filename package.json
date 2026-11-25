@@ -1,13 +1,15 @@
 {
   "name": "mission-evade",
-  "version": "0.4.0-alpha",
+  "version": "0.6.0",
   "description": "Top-down 3D stealth game: behavior-tree guards, A*, LLM + memory learning between runs",
   "directories": {
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test tests/core.test.mjs tests/game.test.mjs tests/fairness.test.mjs",
-    "start": "node scripts/serve.mjs 8000"
+    "test": "node --test tests/core.test.mjs tests/game.test.mjs tests/fairness.test.mjs tests/release.test.mjs",
+    "start": "node scripts/serve.mjs 8000",
+    "assets": "node scripts/build-assets.mjs",
+    "balance": "node scripts/balance.mjs 100"
   },
   "license": "MIT",
   "dependencies": {

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.6.0: Feature complete (Assignment 6)
+
+Changes since the beta (0.5.0, commit `6003bc4`). This is the feature freeze: from here on only polish, optimisation and bug fixes.
+
+### Final feature integrations
+- **Sound** (`js/audio.js`), synthesised with the Web Audio API, no audio files: footsteps for the player and for guards (louder and panned by where they are), suspicion, alert, a heartbeat during a chase, decoy throw and ring, exit lock and open, caught, escaped, mission won and lost, and button clicks. <kbd>M</kbd> or the Sound button mutes; volume is in Settings. Sound only presents the simulation: guards still hear only decoys and radio calls.
+- **Models and textures.** Animated player and guard models (idle, walk, run), a sliding exit door, and matching floor, wall and door textures with normal maps. All are original and built by `scripts/build-assets.mjs`. Guard visors show the guard's state. If a file is missing, the game draws the old plain shape.
+- **Giving up a run costs a life.** Restarting (R), leaving for the menu, or reloading the page during a run each cost one life. The first two ask first, and the default answer keeps the run. Giving up is not a catch: it is not saved to run memory and does not train the guards.
+- **Onboarding.** A mission briefing opens before a player's first mission (goal, cones, exit lock, decoys, lives, controls for keyboard or touch), and "How to play" reopens it. One-line hints appear during the first run when they are useful.
+- **Levels 3 to 5 eased** (`LEVEL_TUNING` in `js/config.js`). Reinforcements see less far and notice later from level 3, chase slower and give up sooner from level 4, and the player gets 1 extra decoy at level 4 and 2 at level 5. Chosen with a bot (`scripts/balance.mjs`, 100 missions): escape rate without → with easing is 31% → 48% at level 3, 18% → 25% at level 4 and 13% → 17% at level 5.
+- **Runs offline from the folder.** three.js is in `vendor/` instead of a CDN; `start.bat` / `start.sh` start a local server.
+- **Tests:** 20 new, 74 in total. `scripts/playtest.mjs` plays five scripted scenarios in a real browser.
+
+### Bug fixes
+- The beta's LLM stopped working: Hugging Face no longer offers Qwen2.5-7B-Instruct through any provider, so every update fell back to the local learner. The default is now `Qwen/Qwen3.5-9B:cheapest`, with reasoning output turned off and a 45 s time limit.
+- Every run leaked the GPU memory of the previous run's guards (cones, paths, routes, watch points). They are now freed.
+- The first decoy of a session froze the picture for about 0.1 s while its shaders were built. They are now built while loading.
+- Browser shortcuts acted as game keys: Ctrl+R also restarted the run, Ctrl+S walked the player.
+- On a phone held sideways, the touch pad ran off the screen and the top bar took two rows.
+- A saved mission with no lives left but no result could be continued. It is now rejected.
+- The stress test's "Back to 2" button said the wrong thing on levels with more guards.
+- The page has a favicon (the console 404 is gone), and the "did not start" screen waits 30 s instead of 10 s.
+
+### Cut from the plan
+- **LLM proxy on AWS Lambda** (planned in Assignment 4). Removed in 0.5.0; the 0.5.0 notes did not say so. An admin enters a Hugging Face token at `/admin` instead, and everyone else uses the local learner.
+- **Procedural maps** (announced in 0.5.0). One hand-built map.
+
+### Known issues
+- The hosted copy on S3 is offline (AWS returns 403 AllAccessDisabled). The build runs locally until the bucket is restored.
+- Levels 4 and 5 are still hard for the bot. With the local learner it escapes 25% and 17% of runs (100 missions); with the LLM only, 23% and 9% (12 missions), and easing gave no gain at level 5. To be tuned with real players.
+- After a fairness lock the LLM sometimes changes no guard value, so the player meets the same guards again.
+- Closing or reloading the page in the middle of a run costs a life even if it was an accident or a crash.
+- The LLM learner needs a Hugging Face token entered at `/admin`; an LLM update adds about 5 to 25 s between runs.
+- `/admin` is hidden but has no login; it only changes the browser it is opened in.
+- A decoy near the exit keeps it locked for about 6 to 9 seconds (intended).
+- Fonts come from Google Fonts; offline, the page falls back to system fonts.
+
+## 0.5.0: Beta (Assignment 5)
+
+Changes since the alpha (0.4.0, commit `9ad8acb`).
+
+### New features
+- **Open-weight LLM learner:** Qwen2.5-7B-Instruct through Hugging Face, served by Featherless AI.
+- **The learner tunes every guard on duty**, reinforcements included: guards that spotted or caught the player get their own values, and every guard can get a watch point.
+- **Fairness lock:** no guard gets harder after a quick catch or two catches in a row.
+- **Admin dashboard** at `/admin`, with `config/game.json` for every player.
+- 14 new tests (54 in total).
+
+### Bug fixes
+- Reinforcement guards always walk a beat or look around as sentries (one could stand frozen).
+
+### Removed
+- The proxy learner and `lambda/`. Procedural map generation was dropped.
+
 ## 0.4.0-alpha: MVP 2.0 (Assignment 4)
 
 Changes since the midterm build (0.3.0, commit `8a510a2`).

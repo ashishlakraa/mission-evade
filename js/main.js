@@ -3,12 +3,15 @@
 
 import { Grid } from './grid.js';
 import { World } from './world.js';
-import { MAP, GUARD_DEFS } from './config.js';
+import { MAP, GUARD_DEFS, levelRules } from './config.js';
 import { reinforcementDefs } from './reinforce.js';
 import { Scene3D } from './render3d.js';
+import { loadAssets } from './assets.js';
+import { Sound } from './audio.js';
+import { Hints } from './hints.js';
 import { MiniMap } from './minimap.js';
 import { Panel } from './ui.js';
-import { Game, State, scoreRun } from './game.js';
+import { Game, State, scoreRun, settleOpenRun } from './game.js';
 import {
   loadMemory, saveMemory, clearMemory, buildRunRecord, recordRun, loadSettings,
   loadMission, saveMission, loadPrefs, savePrefs,
@@ -30,8 +33,16 @@ let settings = loadSettings();
 const prefs = loadPrefs();
 if (!cfg.devView) prefs.dev = false;
 const game = new Game(missionUnderRules(loadMission()));
+// The page was reloaded or closed in the middle of a run: that run counts as given up.
+const settled = settleOpenRun(game.mission);
+if (settled) saveMission(game.mission);
+let menuNotice = settled && `You left in the middle of a run, which costs a life.${settled.change === 'lost' ? ' That was your last one, so the mission is over.' : ''}`;
+const sound = new Sound({ muted: prefs.muted, volume: prefs.volume });
+sound.prepare();
+const touch = matchMedia('(pointer: coarse)').matches;
+const assets = await loadAssets((done, total) => { $('menuLoading').textContent = `Loading the facility… ${done}/${total}`; });
 const panel = new Panel();
-const scene = new Scene3D($('stage'), grid);
+const scene = new Scene3D($('stage'), grid, assets);
 const minimap = new MiniMap($('minimap'), grid);
 
 const opts = {
@@ -43,6 +54,9 @@ let learnJob = 0;         // id of the latest learner call, so stale replies are
 let stressCount = 0;
 let heatVersion = 0;
 let contextLost = false;
+let confirming = null;    // what the player is asked to confirm: 'restart' | 'menu'
+let confirmFrom = null;   // the state to go back to if they change their mind
+let hints = null;         // first-run hints, while they apply
 
 // A saved mission only continues if the admin has not changed the rules since.
 function missionUnderRules(m) {
@@ -57,6 +71,10 @@ function enter(state) {
   document.body.dataset.state = state;
   $('menu').hidden = state !== State.MENU;
   $('pauseMenu').hidden = state !== State.PAUSED;
+  $('briefing').hidden = true;
+  $('confirm').hidden = true;
+  confirming = null;
+  sound.setPlaying(state === State.PLAYING);
   $('missionEnd').hidden = state !== State.MISSION_END;
   if (state !== State.RUN_END) panel.hideEnd();
   $('btnPause').textContent = state === State.PAUSED ? 'Resume' : 'Pause';
@@ -67,7 +85,9 @@ function showMenu() {
   if (!enter(State.MENU)) return;
   world = newWorld();   // a still backdrop behind the menu
   panel.clearToasts();
-  panel.renderMenu(game.mission);
+  panel.setHint(null);
+  panel.renderMenu(game.mission, menuNotice);
+  menuNotice = null;
   setTimeout(() => $(game.inProgress ? 'btnContinue' : 'btnNewMission').focus(), 0);
 }
 
@@ -83,13 +103,45 @@ function newMission() {
 }
 
 function continueMission() {
-  if (!game.inProgress) return newMission();
+  if (!game.inProgress) return startNewMission();
   startRun();
+}
+
+// A player's first mission opens with the briefing.
+function startNewMission() {
+  if (prefs.briefed) newMission();
+  else openBriefing(true);
+}
+
+let briefingStarts = false;   // the briefing's button starts a new mission, or goes back to the menu
+
+function openBriefing(starts) {
+  briefingStarts = starts;
+  $('menu').hidden = true;
+  $('briefing').hidden = false;
+  $('btnBriefGo').innerHTML = starts ? 'Start mission <kbd>Enter</kbd>' : 'Back <kbd>Enter</kbd>';
+  $('btnBriefBack').hidden = !starts;
+  setTimeout(() => $('btnBriefGo').focus(), 0);
+}
+
+function closeBriefing(start) {
+  if ($('briefing').hidden) return;
+  if (start && briefingStarts) {
+    prefs.briefed = true;
+    savePrefs(prefs);
+    newMission();
+    return;
+  }
+  $('briefing').hidden = true;
+  $('menu').hidden = false;
+  setTimeout(() => $('btnHow').focus(), 0);
 }
 
 function showMissionEnd() {
   if (!enter(State.MISSION_END)) return;
+  panel.setHint(null);
   panel.showMissionEnd(game.mission);
+  sound.cue(game.mission.result === 'won' ? 'mission-won' : 'mission-lost');
   setTimeout(() => $('btnAgain').focus(), 0);
 }
 
@@ -104,8 +156,10 @@ function guardDefsForLevel() {
 
 function newWorld() {
   const guardDefs = guardDefsForLevel();
+  const level = levelRules(game.inProgress ? game.mission.level : 1);
   const w = new World({
-    grid, params: mem.params, guardDefs, heat: mem.heat, decoys: cfg.decoys,
+    grid, params: mem.params, guardDefs, heat: mem.heat, decoys: cfg.decoys ? cfg.decoys + level.bonusDecoys : 0,
+    reinforcementEase: level.reinforcementEase,
     watchPoints: watchPointsFor(grid, guardDefs, mem.watchPoints),
     guardTuning: cfg.perGuardTuning ? mem.guardTuning : {},
   });
@@ -117,6 +171,13 @@ function startRun() {
   if (learning) return;   // the next run must use what the guards just learned
   if (!enter(State.PLAYING)) return;
   world = newWorld();
+  if (game.inProgress) {
+    game.mission.runActive = stressCount === 0;
+    saveMission(game.mission);
+  }
+  hints = !prefs.hintsDone && game.inProgress && game.mission.runs === 0 ? new Hints() : null;
+  panel.setHint(null);
+  sound.resetRun();
   decoyQueued = false;
   panel.clearToasts();
   panel.setGuards(world);
@@ -129,6 +190,8 @@ function startRun() {
 
 async function finishRun() {
   enter(State.RUN_END);
+  panel.setHint(null);
+  if (hints && !prefs.hintsDone) { prefs.hintsDone = true; savePrefs(prefs); }
   const run = buildRunRecord(world, mem);
   const stress = stressCount > 0;
   let change = null;
@@ -213,8 +276,51 @@ function nextRun() {
   else startRun();
 }
 
+// Giving up a run costs a life, so a spotted player cannot dodge the catch. Stress
+// tests and runs outside a mission cost nothing.
+function runCounts() { return game.inProgress && stressCount === 0; }
+
 function restartRun() {
-  if (game.state === State.PLAYING || game.state === State.PAUSED) startRun();
+  if (game.state !== State.PLAYING && game.state !== State.PAUSED) return;
+  if (runCounts()) askGiveUp('restart');
+  else startRun();
+}
+
+function askGiveUp(kind) {
+  if (confirming) return;
+  const from = game.state;
+  if (from === State.PLAYING) enter(State.PAUSED);
+  confirming = kind;
+  confirmFrom = from;
+  $('pauseMenu').hidden = true;
+  $('confirm').hidden = false;
+  panel.renderConfirm(kind, game.mission);
+  setTimeout(() => $('btnKeep').focus(), 0);   // the safe choice, so a stray Enter keeps the run
+}
+
+function cancelGiveUp() {
+  if (!confirming) return;
+  confirming = null;
+  $('confirm').hidden = true;
+  $('pauseMenu').hidden = false;
+  if (confirmFrom === State.PLAYING) setPaused(false);
+  else setTimeout(() => $('btnResume').focus(), 0);
+}
+
+function giveUp() {
+  if (!confirming) return;
+  const kind = confirming;
+  const { change } = scoreRun(game.mission, { outcome: 'restarted', time: world.time, detections: world.detections.length });
+  saveMission(game.mission);
+  if (change === 'lost') {
+    // The last life is gone: walk the normal way to the mission result.
+    for (const s of [State.PLAYING, State.RUN_END]) game.go(s);
+    showMissionEnd();
+    return;
+  }
+  if (kind === 'menu') showMenu();
+  else startRun();
+  sound.cue('restart');
 }
 
 // ---------- pause ----------
@@ -230,8 +336,10 @@ function setPaused(v) {
 }
 
 function quitToMenu() {
-  // An unfinished run is simply dropped: it is not saved and costs no life.
   if (game.state === State.RUN_END && learning) return;
+  // Leaving in the middle of a run gives it up, which costs a life.
+  if (game.state === State.PAUSED && runCounts()) { askGiveUp('menu'); return; }
+  if (game.state === State.PAUSED && game.mission) { game.mission.runActive = false; saveMission(game.mission); }
   showMenu();
 }
 
@@ -264,7 +372,8 @@ const pad = { up: 0, down: 0, left: 0, right: 0 };
 let decoyQueued = false;
 
 addEventListener('keydown', (e) => {
-  if (e.target.closest('input, select, textarea')) return;
+  if (e.target.closest?.('input, select, textarea')) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;   // browser shortcuts (Ctrl+R) are not game keys
   const k = e.key.toLowerCase();
   const s = game.state;
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k) && s === State.PLAYING) e.preventDefault();
@@ -272,11 +381,18 @@ addEventListener('keydown', (e) => {
   keys.add(k);
   if (k === 'enter') {
     // Enter on a focused button is that button's click; don't fire a second action.
-    if (e.target.closest('button, summary')) return;
-    if (s === State.MENU) continueMission();
+    if (e.target.closest?.('button, summary')) return;
+    if (!$('briefing').hidden) closeBriefing(true);
+    else if (s === State.MENU) continueMission();
     else if (s === State.RUN_END) nextRun();
     else if (s === State.MISSION_END) newMission();
     return;
+  }
+  if (k === 'm') setMuted(!prefs.muted);
+  if (k === 'escape' && !$('briefing').hidden) { closeBriefing(false); return; }
+  if (confirming) {
+    if (k === 'escape') cancelGiveUp();
+    return;   // every other key waits for the answer
   }
   if (k === ' ' && s === State.PLAYING) decoyQueued = true;
   if (k === 'escape' || k === 'p') setPaused(s === State.PLAYING);
@@ -327,6 +443,19 @@ function setDev(on) {
   $('btnDev').setAttribute('aria-pressed', String(on));
   $('menuDev').checked = on;
 }
+function setMuted(on) {
+  prefs.muted = on;
+  savePrefs(prefs);
+  sound.setMuted(on);
+  $('menuSound').checked = !on;
+  $('btnSound').setAttribute('aria-pressed', String(!on));
+  $('btnSound').textContent = on ? 'Sound off' : 'Sound on';
+}
+function setVolume(v) {
+  prefs.volume = v;
+  savePrefs(prefs);
+  sound.setVolume(v);
+}
 function setLearning(on) {
   mem.learning = on;
   saveMemory(mem);
@@ -347,7 +476,18 @@ function updateLearnerBadge() {
 
 // Buttons
 $('btnContinue').addEventListener('click', continueMission);
-$('btnNewMission').addEventListener('click', newMission);
+$('btnNewMission').addEventListener('click', startNewMission);
+$('btnHow').addEventListener('click', () => openBriefing(false));
+$('btnBriefGo').addEventListener('click', () => closeBriefing(true));
+$('btnBriefBack').addEventListener('click', () => closeBriefing(false));
+$('btnKeep').addEventListener('click', cancelGiveUp);
+$('btnGiveUp').addEventListener('click', giveUp);
+$('btnSound').addEventListener('click', () => setMuted(!prefs.muted));
+$('menuSound').addEventListener('change', (e) => setMuted(!e.target.checked));
+$('menuVolume').addEventListener('input', (e) => setVolume(Number(e.target.value)));
+$('menuVolume').addEventListener('change', () => sound.cue('click'));
+// Sound may only start after the player has clicked, tapped or pressed a key.
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'keydown']) addEventListener(ev, () => sound.unlock(), { capture: true, passive: true });
 $('btnResume').addEventListener('click', () => setPaused(false));
 $('btnRestart').addEventListener('click', restartRun);
 $('btnQuit').addEventListener('click', quitToMenu);
@@ -355,13 +495,17 @@ $('btnNext').addEventListener('click', nextRun);
 $('btnEndMenu').addEventListener('click', quitToMenu);
 $('btnAgain').addEventListener('click', newMission);
 $('btnMenu').addEventListener('click', showMenu);
-$('btnPause').addEventListener('click', () => setPaused(game.state === State.PLAYING));
+$('btnPause').addEventListener('click', () => {
+  if (confirming) cancelGiveUp();
+  else setPaused(game.state === State.PLAYING);
+});
 $('btnDev').addEventListener('click', () => setDev(!prefs.dev));
 $('menuDev').addEventListener('change', (e) => setDev(e.target.checked));
 $('menuLearn').addEventListener('change', (e) => setLearning(e.target.checked));
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
+  if (!b.closest('#pad')) sound.cue('click');
   // Don't leave focus on a top-bar button during play, or Space would press it again.
   if (game.state === State.PLAYING) b.blur();
 });
@@ -418,9 +562,13 @@ function frame(now) {
         acc -= STEP;
         if (world.outcome) { acc = 0; finishRun(); break; }
       }
+      if (game.state === State.PLAYING) sound.frame(world, dt);
+      if (hints && game.state === State.PLAYING) panel.setHint(hints.update(world, dt, touch));
     } else {
       acc = 0;
     }
+
+    sound.events(world.drainEvents(), world);
 
     if (!contextLost) {
       scene.setHeat(mem.heat, heatVersion);
@@ -449,7 +597,10 @@ function frame(now) {
   }
 }
 
-document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) setPaused(true);
+  sound.setHidden(document.hidden);
+});
 addEventListener('resize', () => minimap.resize());
 
 // If the GPU resets, pause instead of drawing into a dead context.
@@ -459,23 +610,30 @@ canvas.addEventListener('webglcontextlost', (e) => {
   contextLost = true;
   setPaused(true);
 });
-canvas.addEventListener('webglcontextrestored', () => { contextLost = false; });
+canvas.addEventListener('webglcontextrestored', () => { contextLost = false; scene.epoch++; });
 
 // ---------- boot ----------
 
 panel.renderSettings(settings);
 $('ruleLevels').textContent = `${rules.levels} security level${rules.levels === 1 ? '' : 's'}`;
-$('ruleLives').textContent = rules.lives === 1 ? 'once' : `${rules.lives} times`;
+$('ruleLives').textContent = rules.lives === 1 ? 'your only life' : `your ${rules.lives} lives`;
+$('briefLevels').textContent = String(rules.levels);
+$('briefLives').textContent = rules.lives === 1 ? '1 life' : `${rules.lives} lives`;
+$('briefDecoys').textContent = cfg.decoys === 1 ? '1 decoy' : `${cfg.decoys} decoys`;
 $('btnDev').hidden = !cfg.devView;
 $('menuDev').closest('label').hidden = !cfg.devView;
 setDev(prefs.dev);
+setMuted(prefs.muted);
+$('menuVolume').value = String(prefs.volume);
 setLearning(mem.learning);
 $('stage').tabIndex = -1;
+document.body.classList.remove('loading');
 showMenu();
 requestAnimationFrame(frame);
 
 // Handy for the console and for automated checks.
 window.missionEvade = {
   get world() { return world; }, get memory() { return mem; }, get game() { return game; },
-  config: cfg, startRun, newMission, showMenu, scene,
+  config: cfg, startRun, newMission, showMenu, scene, sound, assets,
+  get fps() { return fps; },
 };

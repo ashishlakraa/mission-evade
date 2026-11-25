@@ -23,7 +23,8 @@ const MOVES = {
 };
 
 // A mission: clear every security level before running out of lives.
-// Escaping clears the current level; getting caught costs a life.
+// Escaping clears the current level; getting caught costs a life, and so does giving up
+// a run (restarting it, leaving for the menu, or closing the page), so a chase cannot be dodged.
 // The guards learn after every run, so each level is tuned against how you played.
 export const MISSION_RULES = { lives: 3, levels: 5 };
 
@@ -32,14 +33,17 @@ export function newMission(rules = MISSION_RULES) {
     version: 1,
     level: 1, levels: rules.levels,
     lives: rules.lives, maxLives: rules.lives,
-    runs: 0, escapes: 0, catches: 0, spotted: 0,
+    runs: 0, escapes: 0, catches: 0, restarts: 0, spotted: 0,
+    runActive: false,         // a run has started and is not scored yet
     bestTime: null,
     result: null,             // null while in progress | 'won' | 'lost'
   };
 }
 
 // Apply one finished run to the mission. Returns what changed, for the end card.
+// outcome: 'escaped' | 'caught' | 'restarted' (the player gave the run up)
 export function scoreRun(m, { outcome, time, detections = 0 }) {
+  m.runActive = false;
   if (m.result) return { change: 'none' };
   m.runs++;
   m.spotted += detections;
@@ -50,10 +54,18 @@ export function scoreRun(m, { outcome, time, detections = 0 }) {
     m.level++;
     return { change: 'level-up' };
   }
-  m.catches++;
+  if (outcome === 'restarted') m.restarts = (m.restarts || 0) + 1;   // missions saved by the beta have no count
+  else m.catches++;
   m.lives = Math.max(0, m.lives - 1);
   if (m.lives === 0) { m.result = 'lost'; return { change: 'lost' }; }
   return { change: 'life-lost' };
+}
+
+// A saved mission that stopped in the middle of a run (the page was reloaded or closed):
+// that run counts as given up. Returns the change, or null if no run was open.
+export function settleOpenRun(m) {
+  if (!m || m.result || m.runActive !== true) return null;
+  return scoreRun(m, { outcome: 'restarted', time: 0 });
 }
 
 // A saved mission is trusted only if it has the right shape.
@@ -61,6 +73,7 @@ export function validMission(m) {
   return !!m && m.version === 1
     && Number.isInteger(m.level) && m.level >= 1 && m.level <= m.levels
     && Number.isInteger(m.lives) && m.lives >= 0 && m.lives <= m.maxLives
+    && (m.lives > 0 || m.result !== null)   // out of lives means the mission is over
     && Number.isInteger(m.runs) && (m.result === null || m.result === 'won' || m.result === 'lost');
 }
 

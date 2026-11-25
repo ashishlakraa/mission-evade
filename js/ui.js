@@ -259,16 +259,35 @@ export class Panel {
 
   // ---------- menu and mission end ----------
 
-  renderMenu(mission) {
+  // What giving up this run costs, before the player does it.
+  renderConfirm(kind, m) {
+    const last = m.lives === 1;
+    $('confirmTitle').textContent = kind === 'menu' ? 'Leave this run?' : 'Restart this run?';
+    $('confirmText').textContent = last
+      ? 'It costs a life, and this is your last one: the mission ends.'
+      : `It costs a life. You have ${m.lives}, so ${m.lives - 1} will be left. The security level stays the same.`;
+    $('btnGiveUp').textContent = last ? 'End the mission' : kind === 'menu' ? 'Leave (−1 life)' : 'Restart (−1 life)';
+  }
+
+  // First-run hint over the 3D view (null hides it).
+  setHint(text) {
+    const el = $('hint');
+    if (el.hidden === !text && el.textContent === (text || '')) return;
+    el.hidden = !text;
+    el.textContent = text || '';
+  }
+
+  renderMenu(mission, notice = null) {
     const going = !!mission && !mission.result;
     $('btnContinue').hidden = !going;
     const nm = $('btnNewMission');
     nm.className = going ? '' : 'primary';
     nm.innerHTML = going ? 'New mission' : 'Start mission <kbd>Enter</kbd>';
     const st = $('menuStatus');
-    st.hidden = !going;
+    st.hidden = !going && !notice;
+    st.textContent = notice || '';
     if (going) {
-      st.textContent = `Mission in progress: security level ${mission.level}/${mission.levels}, `
+      st.textContent = `${notice ? `${notice} ` : ''}Mission in progress: security level ${mission.level}/${mission.levels}, `
         + `${mission.lives} ${mission.lives === 1 ? 'life' : 'lives'} left, ${mission.runs} run${mission.runs === 1 ? '' : 's'} played.`;
     }
   }
@@ -281,20 +300,22 @@ export class Panel {
     t.className = `end-title ${won ? 'won' : 'lost'}`;
     $('mSub').textContent = won
       ? `You beat ${m.levels} levels of guards that kept learning your routes, in ${m.runs} runs.`
-      : `The guards caught you ${m.catches} time${m.catches === 1 ? '' : 's'}. They reached security level ${m.level}. A new mission starts them from scratch.`;
+      : `You reached security level ${m.level} of ${m.levels}. You were ${m.catches ? `caught ${times(m.catches)}` : 'never caught'}${m.restarts ? ` and gave up ${m.restarts} run${m.restarts === 1 ? '' : 's'}` : ''}. A new mission starts the guards from scratch.`;
     $('mRuns').textContent = String(m.runs);
     $('mEscapes').textContent = String(m.escapes);
     $('mCatches').textContent = String(m.catches);
+    $('mRestarts').textContent = String(m.restarts || 0);
     $('mSpotted').textContent = String(m.spotted);
     $('mBest').textContent = m.bestTime == null ? '—' : `${m.bestTime}s`;
     $('mLevel').textContent = `${m.level}/${m.levels}`;
+    $('mLives').textContent = `${m.lives}/${m.maxLives}`;
   }
 
   // ---------- HUD, stats, log ----------
 
   updateHud(world, mem, mission) {
     $('hudTime').textContent = `${world.time.toFixed(1)}s`;
-    $('runNo').textContent = mission ? `Run ${mission.runs + (world.outcome ? 0 : 1)}` : 'Practice';
+    $('runNo').textContent = mission ? `Run ${mission.runs + (world.outcome || mission.result ? 0 : 1)}` : 'Practice';
     $('hudLevel').textContent = mission ? `${mission.level}/${mission.levels}` : '—';
     const lives = $('hudLives');
     const maxL = mission?.maxLives ?? 0;
@@ -378,4 +399,5 @@ function harderFor(c) {
   return PARAM_SPEC[c.key].harder * (c.to - c.from) > 0;
 }
 
+const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
 const fmt = (v) => String(Math.round(v * 100) / 100);

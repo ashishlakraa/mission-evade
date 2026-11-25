@@ -91,6 +91,10 @@ body.dev .panel { display: flex; }
 .pips.lives i { background: var(--chase); border-radius: 2px; transform: rotate(45deg) scale(.85); }
 .pips.lives i.used { background: transparent; }
 .top-actions button[aria-pressed="true"]#btnDev { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+/* Nothing can start until the models are in. */
+body.loading .menu-actions, body.loading .menu-more { visibility: hidden; }
+body:not(.loading) .menu-loading { display: none; }
+.menu-loading { margin: 0; font-family: var(--font-data); font-size: 13px; color: var(--muted); }
 /* Mission HUD means nothing on the menu. */
 body[data-state="MENU"] .hud, body[data-state="MENU"] .run-no,
 body[data-state="MENU"] #btnPause, body[data-state="MENU"] .keys { visibility: hidden; }
@@ -180,7 +184,26 @@ body:not([data-state="PLAYING"]) .pad { visibility: hidden; }
 .menu-actions button { padding: 9px 16px; font-size: 16px; }
 .menu-more { border-top: 1px solid var(--line); padding-top: 8px; }
 .menu-more summary { cursor: pointer; font-weight: 600; }
-.howto { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 5px; color: var(--ink-2); }
+.vol { display: flex; align-items: center; gap: 10px; }
+.vol input { flex: 1; max-width: 220px; accent-color: var(--accent); }
+.brief { width: min(600px, 100%); }
+.brief-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.brief-list li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; color: var(--ink-2); }
+.brief-list b { color: var(--ink); }
+.bi { width: 34px; height: 34px; border-radius: 8px; background: var(--stage); display: grid; place-items: center; }
+.bi::before { content: ""; display: block; }
+.bi-exit::before { width: 16px; height: 16px; border-radius: 3px; background: #3ccf78; box-shadow: 0 0 10px #3ccf78; }
+.bi-cone::before { width: 26px; height: 26px; border-radius: 50%; background: conic-gradient(from 60deg, #3f8ee8 0 60deg, transparent 60deg); }
+.bi-decoy::before { width: 9px; height: 9px; border-radius: 50%; background: #f2c94c; box-shadow: 0 0 0 4px var(--stage), 0 0 0 6px rgba(242,201,76,.65); }
+.bi-life::before { width: 13px; height: 13px; border-radius: 2px; background: #f05a60; transform: rotate(45deg); }
+.brief-keys { margin: 0; display: flex; flex-wrap: wrap; justify-content: inherit; gap: 6px 14px; font-size: 13px; color: var(--ink-2); padding-top: 8px; border-top: 1px solid var(--line); }
+.touch-only { display: none; }
+.hint-line {
+  position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  margin: 0; padding: 8px 18px; border-radius: 999px; width: max-content; max-width: calc(100% - 24px); text-align: center;
+  background: rgba(47, 124, 246, .94); color: #fff; font-size: 16px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+body:not([data-state="PLAYING"]) .hint-line { visibility: hidden; }
 .menu-settings { display: grid; gap: 8px; padding-top: 8px; }
 .pause-inner { width: min(320px, 100%); justify-items: stretch; text-align: center; }
 .end-actions.stack { flex-direction: column; }
@@ -218,7 +241,9 @@ body:not([data-state="PLAYING"]) .pad { visibility: hidden; }
 
 .pad { display: none; }
 @media (pointer: coarse) {
-  .keys { display: none; }
+  .keys, .kbd-only, kbd { display: none; }
+  .touch-only { display: flex; }
+  .hint-line { bottom: auto; top: 92px; }
   .pad {
     position: absolute; right: 12px; bottom: 12px; display: grid; gap: 6px;
     grid-template-columns: repeat(3, 50px); grid-template-areas: ". up ." "left down right" "decoy decoy decoy";
@@ -332,6 +357,23 @@ body:not([data-state="PLAYING"]) .pad { visibility: hidden; }
   .menu-title { font-size: 30px; }
   .panel { border-left: 0; overflow: visible; }
   .hud { margin-left: 0; }
+}
+/* Phones held sideways: keep the top bar to one row and the hint out of the map. */
+@media (max-height: 480px) {
+  .topbar { padding: 4px 12px; gap: 6px 14px; flex-wrap: nowrap; }
+  .brand-name { font-size: 15px; }
+  .run-no, .hud-item:has(#hudLearner), .seg, #btnDev { display: none; }
+  .hud { gap: 2px 14px; flex-wrap: nowrap; }
+  .top-actions button { padding: 3px 9px; font-size: 13px; white-space: nowrap; }
+  .stage { min-height: 0; }
+  .play-hud { top: 6px; }
+  .toasts { top: 40px; }
+  .hint-line { left: 12px; bottom: 12px; top: auto; transform: none; font-size: 13px; padding: 6px 12px; border-radius: 10px; max-width: min(300px, 45vw); }
+  .menu-inner, .end-inner { padding: 12px 16px; gap: 8px; }
+  .menu-title { font-size: 26px; }
+  .end-title { font-size: 24px; }
+  .pause-inner { width: min(460px, 100%); }
+  .pause-inner .end-actions.stack { flex-direction: row; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .learn-busy::after { animation: none; }

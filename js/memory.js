@@ -109,10 +109,16 @@ export function saveMission(m) {
   try { localStorage.setItem(MISSION_KEY, JSON.stringify(m)); } catch { /* storage blocked */ }
 }
 
-// Per-player conveniences: developer view.
+// Per-player conveniences: developer view, sound, and whether the onboarding was seen.
 export function loadPrefs() {
-  const base = { dev: false };
-  try { return { ...base, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { return base; }
+  const base = { dev: false, muted: false, volume: 0.7, briefed: false, hintsDone: false };
+  try {
+    const p = { ...base, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') };
+    const v = Number(p.volume);
+    p.volume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : base.volume;
+    p.muted = p.muted === true;
+    return p;
+  } catch { return base; }
 }
 
 export function savePrefs(p) {

@@ -41,6 +41,21 @@ export const REINFORCE_RULES = {
   patrolReach: 4,   // a reinforcement walks between its post and a cell up to this many steps away
 };
 
+// Difficulty easing for the later levels, where 4 to 6 guards share a small map.
+// bonusDecoys: extra decoys on top of the admin's number.
+// reinforcementEase: parameter changes for reinforcement guards only, in PARAM_SPEC steps;
+// the result always stays inside PARAM_SPEC (see World.paramsFor).
+// Chosen with scripts/balance.mjs (100 bot missions, escape rate without → with easing:
+// level 3 31% → 48%, level 4 18% → 25%, level 5 13% → 17%). The bot rarely uses decoys,
+// so the bonus decoys come on top of that.
+const LATE_EASE = { coneRange: -2, coneAngle: -2, noticeTime: 2, chaseSpeed: -1, giveUpTime: -2 };
+export const LEVEL_TUNING = {
+  3: { reinforcementEase: { coneRange: -2, noticeTime: 2 } },
+  4: { bonusDecoys: 1, reinforcementEase: LATE_EASE },
+  5: { bonusDecoys: 2, reinforcementEase: LATE_EASE },
+};
+export const levelRules = (level) => ({ bonusDecoys: 0, reinforcementEase: {}, ...LEVEL_TUNING[level] });
+
 export const PLAYER_SPEED = 3.2;   // cells per second
 export const PLAYER_RADIUS = 0.3;
 export const GUARD_RADIUS = 0.32;

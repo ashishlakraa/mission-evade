@@ -2,9 +2,9 @@
 
 A top-down 3D stealth game for CS 549 (AI for Visual Computing). One player against two guards, plus one more guard for each security level. Guards run a behavior tree, move with A*, and learn between runs from your earlier routes, using an LLM plus run memory.
 
-**Goal:** reach the exit tile without a guard touching you. The exit is open (green) only while every guard is on patrol, and locked (red) while any of them is suspicious, investigating or chasing. A mission has **5 security levels** and **3 lives**: each escape clears a level, each catch costs a life, and the guards adapt after every run. Each level above 1 adds a reinforcement guard, posted from run memory where you were caught, then where you were spotted, then where you walk most (`js/reinforce.js`).
+**Goal:** reach the exit tile without a guard touching you. The exit is open (green) only while every guard is on patrol, and locked (red) while any of them is suspicious, investigating or chasing. A mission has **5 security levels** and **3 lives**: each escape clears a level, each catch or given-up run costs a life, and the guards adapt after every run. Each level above 1 adds a reinforcement guard, posted from run memory where you were caught, then where you were spotted, then where you walk most (`js/reinforce.js`).
 
-## Game loop (alpha, v0.4.0)
+## Game loop
 
 ```
 Main menu ──▶ Run ⇄ Pause
@@ -16,24 +16,24 @@ Main menu ──▶ Run ⇄ Pause
            Mission complete / Mission failed ──▶ play again / main menu
 ```
 
-The flow lives in `js/game.js` (a small state machine plus the mission rules, no DOM), so it is covered by headless tests. A mission in progress survives a page reload (**Continue mission** on the menu). Starting a new mission resets what the guards learned. See `CHANGELOG.md` for everything that changed since the midterm build.
+The flow lives in `js/game.js` (a small state machine plus the mission rules, no DOM), so it is covered by headless tests. A mission in progress survives a page reload (**Continue mission** on the menu). Starting a new mission resets what the guards learned. Restarting, leaving for the menu, or reloading during a run gives that run up and costs a life. See `CHANGELOG.md` for what changed in each version. Version 0.6.0 is feature complete.
 
 ## Run it
 
-It is a static site: plain JavaScript modules, no build step. Three.js loads from a CDN.
+It is a static site: plain JavaScript modules, no build step. Everything it needs is in this folder (three.js is in `vendor/`), so it also runs offline.
 
-```bash
-# from this folder
-npm start
-# open http://localhost:8000
-```
+- **Windows:** double-click `start.bat`.
+- **macOS, Linux:** run `./start.sh`.
+- **Or:** `npm start`, or `python -m http.server 8000`.
+
+Then open http://localhost:8000. You need Node.js or Python 3 for the local server. A phone on the same network can open `http://<your computer's IP>:8000`.
 
 Opening `index.html` by double-click does not work, because browsers block ES modules from `file://`.
 
 **Deploy to S3** (static website hosting on):
 
 ```bash
-aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv"
+aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_modules/*" --exclude "tests/*" --exclude "scripts/*" --exclude ".git/*" --exclude ".gitignore" --exclude "package*.json" --exclude "*.md" --exclude "*.pdf" --exclude "ramp.csv" --exclude "start.*" --exclude ".gitattributes" --exclude "playtest-out/*"
 ```
 
 `--cache-control no-cache` matters: the game is plain ES modules, and without it browsers may keep some old modules after an update and run a mix of old and new code. `npm start` uses `scripts/serve.mjs`, which sends the same header locally.
@@ -45,13 +45,14 @@ aws s3 sync . s3://<your-bucket> --cache-control no-cache --exclude "node_module
 | W A S D / arrows | Move (touch screens get an on-screen pad) |
 | Space | Throw a decoy (3 per run) |
 | Esc / P | Pause menu (resume, restart run, main menu) |
-| R | Restart the run (costs no life) |
+| R | Restart the run (costs a life; asks first) |
+| M | Sound on / off |
 | Enter | Start / continue from the menu, next run, play again |
 | V | Camera: angled / top-down |
 | ` | Developer view (behavior tree, learner, debug map) |
 | G / H | Toggle A* paths / heat map |
 
-## What is in the MVP
+## What is in the game
 
 **Behavior tree** (`js/bt.js`, `js/guard.js`). A real tree, not a switch statement: Selector, Sequence, a memory Sequence, Conditions and Actions, each returning SUCCESS, FAILURE or RUNNING. A higher-priority branch halts and resets the lower ones.
 
@@ -83,7 +84,15 @@ States never flicker. Suspicion fills while the player is in sight and drains wh
    - watch points are floor cells away from the start and exit; a reinforcement's stays within 6 steps of its post, out of the exit approach and out of sight of the start
 4. The end-of-run card shows what the guards learned and why.
 
-Learner options (set by the admin at `/admin`): an **open-weight model** on Hugging Face (default `Qwen/Qwen2.5-7B-Instruct`, served by Featherless AI) or the **local learner**, which needs no key and uses the heat map with simple rules. If an LLM call fails, the game falls back to the local learner and says so. Learning can be switched off to freeze the guards.
+Learner options (set by the admin at `/admin`): an **open-weight model** on Hugging Face (default `Qwen/Qwen3.5-9B:cheapest`, through the Hugging Face router, with reasoning output turned off) or the **local learner**, which needs no key and uses the heat map with simple rules. If an LLM call fails, the game falls back to the local learner and says so. Learning can be switched off to freeze the guards.
+
+**Sound** (`js/audio.js`). Synthesised with the Web Audio API. The simulation writes what happened to `World.events`; the page drains that list every frame and plays cues. Nothing in the simulation reads it back, so sound cannot change a run.
+
+**Models and textures** (`assets/`, `js/assets.js`). Original, generated by `npm run assets` (`scripts/build-assets.mjs`): glTF binary models with idle, walk and run clips, and PNG textures with normal maps. Any file that fails to load is replaced by a plain shape. To use other models, replace a `.glb` under the same name: it must face +x, and the clips must be named Idle, Walk and Run.
+
+**Onboarding.** A briefing before a player's first mission, and one-line hints in the first run (`js/hints.js`).
+
+**Difficulty** (`LEVEL_TUNING` in `js/config.js`). Reinforcements are eased from level 3 and the player gets extra decoys at levels 4 and 5. `npm run balance` plays bot missions and prints the escape rate per level.
 
 ## Developer view
 
@@ -102,11 +111,10 @@ A Hugging Face token entered at `/admin` is saved only in that browser and sent 
 ## Tests
 
 ```bash
-npm install   # only needed for three.js in browser tests; core tests have no dependencies
-npm test
+npm test      # no dependencies needed
 ```
 
-53 headless tests. `tests/game.test.mjs` covers the game flow: allowed and refused state changes, levels and lives, corrupt saved missions, and a full mission played by a bot against the real simulation. `tests/core.test.mjs` covers: map connectivity, line of sight through walls and corners, A* optimality against brute-force Dijkstra on 200 random pairs, no corner cutting, the behavior tree's priority and halting, patrol, spot → chase → catch, chase → give-up → search → patrol without flicker, decoys and hearing, escape, and the learner's safety checks.
+74 headless tests. `tests/release.test.mjs` covers giving up a run, sound events, hints, level easing, and the generated models and textures. `tests/game.test.mjs` covers the game flow: allowed and refused state changes, levels and lives, corrupt saved missions, and a full mission played by a bot against the real simulation. `tests/core.test.mjs` covers: map connectivity, line of sight through walls and corners, A* optimality against brute-force Dijkstra on 200 random pairs, no corner cutting, the behavior tree's priority and halting, patrol, spot → chase → catch, chase → give-up → search → patrol without flicker, decoys and hearing, escape, and the learner's safety checks.
 
 ## Project layout
 
@@ -128,9 +136,15 @@ config/game.json    settings for every player (download it from /admin)
 js/render3d.js      Three.js view
 js/minimap.js       2D debug map (A* searched cells, heat map)
 js/game.js          screen state machine and mission rules (headless)
+js/audio.js         sound (Web Audio, synthesised)
+js/assets.js        loads models and textures, with fallbacks
+js/hints.js         first-run hints
 js/reinforce.js     where reinforcement guards are posted (from run memory)
 js/ui.js            menu, HUD, end screens, developer panel
 js/main.js          input, game loop, wiring
+assets/             models, textures, favicon
+vendor/three/       three.js 0.160 and its glTF loader (MIT, see LICENSE)
+scripts/            local server, asset builder, balance bot, scenario playtest, reports
 tests/              headless tests (node --test), fairness.test.mjs for per-guard tuning and the fairness rules
 ```
 
